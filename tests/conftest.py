@@ -10,19 +10,19 @@ logging.basicConfig(filename=f"/tmp/{log_name}.log",
 
 
 def pytest_addoption(parser):
-    parser.addoption("--dataset", action="store", default="sift", help="public dataset for testing")
-    parser.addoption("--entities", action="store", default=200000, help="num entities of data for testing")
-    parser.addoption("--path", action="store", default="/home/data/milvus/raw_data/sift1b/", help="location of dataset")
+    parser.addoption("--data_type", action="store", default="sift", help="data_type for testing")
+    parser.addoption("--entities", action="store", default=200000, help="num entities of data")
+    parser.addoption("--path", action="store", default="/home/data/milvus/raw_data/sift1b/", help="test data location")
 
 
 @pytest.fixture
-def dataset(request):
-    return request.config.getoption("--dataset")
+def data_type(request):
+    return request.config.getoption("--data_type")
 
 
 @pytest.fixture
 def entities(request):
-    return request.config.getoption("--entities")
+    return int(request.config.getoption("--entities"))
 
 
 @pytest.fixture

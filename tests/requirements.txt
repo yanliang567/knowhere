@@ -6,7 +6,7 @@ apt install -y libopenblas-dev
 apt-get install -y pip
 
 
-
+pytest
 pip install numpy==1.22.3
 h5py==2.7.1
 pip install knowhere-1.0.0-cp38-cp38-linux_x86_64.whl
