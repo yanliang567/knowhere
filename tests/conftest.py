@@ -1,9 +1,6 @@
 import logging
 import pytest
 
-timeout = 60
-dimension = 128
-delete_timeout = 60
 
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 DATE_FORMAT = "%m/%d/%Y %H:%M:%S %p"

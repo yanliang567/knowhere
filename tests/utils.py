@@ -1,9 +1,3 @@
-import os
-import logging
-import numpy as np
-import sklearn.preprocessing
-import h5py
-
 
 VECTORS_PER_FILE = 1000000
 SIFT_VECTORS_PER_FILE = 100000

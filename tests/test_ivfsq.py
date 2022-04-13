@@ -8,7 +8,7 @@ import utils
 
 
 class TestIvfSq:
-    @pytest.mark.tags("rt")
+
     def test_ivfsq_rt(self, dataset, entities, path):
         dim = utils.dim(dataset)
         idx = knowhere.IVFSQ()
@@ -16,10 +16,14 @@ class TestIvfSq:
         # arr = np.append(arr, arr5, axis=0)
         vectors_per_file = utils.get_len_vectors_per_file(dataset)
         i = 0
+        file = utils.gen_file_name(i, dataset)
+        arr = np.load(file)
+        i = 1
         while i < (entities // vectors_per_file):
             file = utils.gen_file_name(i, dataset)
             # file = "/home/data/milvus/raw_data/sift1b/binary_128d_00000.npy"
             arr = np.append(arr, np.load(file), axis=0)
+            i += 1
         arr = np.float32(arr)
         logging.info(f"data entities: {len(arr)}")
         data = knowhere.ArrayToDataSet(arr)
@@ -55,10 +59,16 @@ class TestIvfSq:
         knowhere.DumpResultDataSet(ans, dis, idx)
         tt = time.time() - t0
         logging.info(f"covert to dataset time: {tt}")
+        assert(tt < 10)
         logging.info(idx)
         logging.info(dis)
 
-    @pytest.mark.tags("recall")
+    @pytest.mark.recall
     def test_ivfsq_recall(self, dataset, path):
+        # recall uses fixed entities
+        pass
+
+    @pytest.mark.latency
+    def test_ivfsq_latency(self, dataset, path):
         # recall uses fixed entities
         pass
