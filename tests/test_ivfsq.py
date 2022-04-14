@@ -9,7 +9,12 @@ import utils
 
 class TestIvfSq:
     @pytest.mark.latency
-    def test_ivfsq_latency(self, data_type, entities, path):
+    @pytest.mark.parametrize("nlist", [1024])
+    @pytest.mark.parametrize("nprobe", [16])
+    @pytest.mark.parametrize("metric_type", ["L2"])
+    def test_ivfsq_latency(self, data_type, entities,
+                           nq, top_k, nlist, nprobe, metric_type, path):
+        logging.info(f"********** test latency start: data_type: {data_type}, entities: {entities} **********")
         dim = utils.dim(data_type)
         idx = knowhere.IVFSQ()
         # arr5 = np.random.uniform(1, 5, (20000, 128)).astype("float32")
@@ -32,10 +37,10 @@ class TestIvfSq:
             json.dumps(
                 {
                     "dim": dim,
-                    "k": 10,
-                    "nlist": 100,
-                    "nprobe": 4,
-                    "metric_type": "L2",
+                    "k": top_k,
+                    "nlist": nlist,
+                    "nprobe": nprobe,
+                    "metric_type": metric_type,
                     "SLICE_SIZE": 4,
                 }
             )
@@ -53,8 +58,8 @@ class TestIvfSq:
         ans = idx.Query(query_data, cfg, knowhere.EmptyBitSetView())
         tt = time.time() - t0
         logging.info(f"search time: {tt}")
-        idx = np.zeros((1000, 10), np.int32)
-        dis = np.zeros((1000, 10), np.float32)
+        idx = np.zeros((nq, top_k), np.int32)
+        dis = np.zeros((nq, top_k), np.float32)
         t0 = time.time()
         knowhere.DumpResultDataSet(ans, dis, idx)
         tt = time.time() - t0
@@ -64,8 +69,13 @@ class TestIvfSq:
         logging.info(dis)
 
     @pytest.mark.recall
-    def test_ivfsq_recall(self, data_type, path):
+    @pytest.mark.parametrize("nlist", [1024])
+    @pytest.mark.parametrize("nprobe", [16])
+    def test_ivfsq_recall(self, data_type, nlist, nprobe, path):
         # recall uses fixed entities
+        logging.info(f"********** test recall start: data_type: {data_type} **********")
+
+        # dataset and search params are fixed for recall tests
         dataset = utils.get_dataset(data_type)
         logging.info(f"hdf5 dataset: {dataset}")
         metric_type = "L2"
@@ -75,41 +85,45 @@ class TestIvfSq:
         query_vectors = utils.normalize(metric_type, np.array(dataset["test"][:nq]))
         true_ids = np.array(dataset["neighbors"])
 
+        # index
         dim = utils.dim(data_type)
         idx = knowhere.IVFSQ()
         logging.info(f"data entities: {len(insert_vectors)}")
         data = knowhere.ArrayToDataSet(insert_vectors)
-
-        nprobe = 4
         cfg = knowhere.CreateConfig(
             json.dumps(
                 {
                     "dim": dim,
                     "k": top_k,
-                    "nlist": 1024,
+                    "nlist": nlist,
                     "nprobe": nprobe,
                     "metric_type": metric_type,
                     "SLICE_SIZE": 4,
                 }
             )
         )
+        # start building index
         t0 = time.time()
         idx.Train(data, cfg)
         idx.AddWithoutIds(data, cfg)
         tt = time.time() - t0
         logging.info(f"index time: {tt}")
+        # start searching
         query_data = knowhere.ArrayToDataSet(query_vectors)
         t0 = time.time()
         ans = idx.Query(query_data, cfg, knowhere.EmptyBitSetView())
         tt = time.time() - t0
         logging.info(f"search time: {tt}")
-        idx = np.zeros((nq, top_k), np.int32)
-        dis = np.zeros((nq, top_k), np.float32)
+        # retrieve search results
+        result_ids = np.zeros((nq, top_k), np.int32)
+        result_dis = np.zeros((nq, top_k), np.float32)
         t0 = time.time()
-        knowhere.DumpResultDataSet(ans, dis, idx)
+        knowhere.DumpResultDataSet(ans, result_dis, result_ids)
         tt = time.time() - t0
-        logging.info(f"covert to data_type time: {tt}")
+        logging.info(f"covert to dataset time: {tt}")
         assert (tt < 10)
-        logging.info(f"result ids: {idx}")
+        logging.info(f"result ids: {result_ids}")
         logging.info(f"true ids: {true_ids}")
+        acc_value = utils.get_recall_value(true_ids[:nq, :top_k].tolist(), result_ids)
+        logging.info(f"acc: {acc_value}")
         # logging.info(dis)

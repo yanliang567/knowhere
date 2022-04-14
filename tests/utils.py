@@ -85,3 +85,23 @@ def get_dataset(data_type):
         raise Exception("data_type: %s not supported" % data_type)
     return dataset
 
+
+def get_recall_value(true_ids, result_ids):
+    """
+    Use the intersection length
+    true_ids: neighbors taken from the dataset
+    result_ids: ids returned by query
+    """
+    sum_radio = 0.0
+    for index, item in enumerate(result_ids):
+        # tmp = set(item).intersection(set(flat_id_list[index]))
+
+        # Get the value of true_ids and the returned value to do the intersection
+        tmp = set(true_ids[index]).intersection(set(item))
+
+        # Add up each ratio
+        sum_radio = sum_radio + len(tmp) / len(item)
+        # logger.debug(sum_radio)
+
+    # Calculate the average ratio and take three digits after the decimal point
+    return round(sum_radio / len(result_ids), 4)
