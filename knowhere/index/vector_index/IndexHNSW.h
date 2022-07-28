@@ -13,10 +13,10 @@
 
 #include <memory>
 
-#include "hnswlib/hnswlib.h"
+#include "hnswlib/hnswlib/hnswlib.h"
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/VecIndex.h"
 
 namespace knowhere {
 
@@ -28,19 +28,25 @@ class IndexHNSW : public VecIndex {
     }
 
     BinarySet
-    Serialize(const Config& config) override;
+    Serialize(const Config&) override;
 
     void
-    Load(const BinarySet& index_binary) override;
+    Load(const BinarySet&) override;
 
     void
-    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
+    Train(const DatasetPtr&, const Config&) override;
 
     void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) override;
+    GetVectorById(const DatasetPtr&, const Config&) override;
+
+    DatasetPtr
+    Query(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
+
+    DatasetPtr
+    QueryByRange(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
 
     int64_t
     Count() override;
@@ -48,8 +54,8 @@ class IndexHNSW : public VecIndex {
     int64_t
     Dim() override;
 
-    void
-    UpdateIndexSize() override;
+    int64_t
+    Size() override;
 
 #if 0
     void

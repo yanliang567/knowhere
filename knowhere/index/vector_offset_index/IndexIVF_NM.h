@@ -19,7 +19,7 @@
 #include <faiss/IndexIVF.h>
 
 #include "knowhere/common/Typedef.h"
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/VecIndex.h"
 #include "knowhere/index/vector_offset_index/OffsetBaseIndex.h"
 
 namespace knowhere {
@@ -49,12 +49,13 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&, const faiss::BitsetView bitset) override;
+    GetVectorById(const DatasetPtr&, const Config&) override;
 
-#if 0
     DatasetPtr
-    QueryById(const DatasetPtr& dataset, const Config& config) override;
-#endif
+    Query(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
+
+    DatasetPtr
+    QueryByRange(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
 
     int64_t
     Count() override;
@@ -62,8 +63,8 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     int64_t
     Dim() override;
 
-    void
-    UpdateIndexSize() override;
+    int64_t
+    Size() override;
 
 #if 0
     StatisticsPtr
@@ -71,11 +72,6 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
 
     void
     ClearStatistics() override;
-#endif
-
-#if 0
-    DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
 #endif
 
     virtual void
@@ -92,20 +88,20 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     GenParams(const Config&);
 
     virtual void
-    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::BitsetView bitset);
+    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::BitsetView);
+
+    virtual void
+    QueryByRangeImpl(int64_t, const float*, float, float*&, int64_t*&, size_t*&, const Config&,
+                     const faiss::BitsetView);
 
     void
     SealImpl() override;
 
  protected:
     std::mutex mutex_;
-    std::vector<size_t> prefix_sum;
 
-    // data_:    if CPU, malloc memory while loading data
-    // ro_codes: if GPU, hold a ptr of read only codes so that
-    //            destruction won't be done twice
-    std::shared_ptr<uint8_t[]> data_ = nullptr;
-    faiss::PageLockMemoryPtr ro_codes = nullptr;
+    // ro_codes: if GPU, hold a ptr of read only codes so that destruction won't be done twice
+    faiss::PageLockMemoryPtr ro_codes_ = nullptr;
 };
 
 using IVFNMPtr = std::shared_ptr<IVF_NM>;

@@ -15,7 +15,6 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/distances.h>
-#include <faiss/utils/distances_range.h>
 #include <faiss/utils/extra_distances.h>
 #include <faiss/utils/utils.h>
 
@@ -83,23 +82,13 @@ void IndexFlat::range_search(
         float radius,
         RangeSearchResult* result,
         const BitsetView bitset) const {
-    FAISS_THROW_MSG("This interface is abandoned yet.");
-}
-
-void IndexFlat::range_search(
-        idx_t n,
-        const float* x,
-        float radius,
-        std::vector<faiss::RangeSearchPartialResult*>& result,
-        size_t buffer_size,
-        const faiss::BitsetView bitset) {
     switch (metric_type) {
         case METRIC_INNER_PRODUCT:
             range_search_inner_product(
-                    x, get_xb(), d, n, ntotal, radius, result, buffer_size, bitset);
+                    x, get_xb(), d, n, ntotal, radius, result, bitset);
             break;
         case METRIC_L2:
-            range_search_L2sqr(x, get_xb(), d, n, ntotal, radius, result, buffer_size, bitset);
+            range_search_L2sqr(x, get_xb(), d, n, ntotal, radius, result, bitset);
             break;
         default:
             FAISS_THROW_MSG("metric type not supported");

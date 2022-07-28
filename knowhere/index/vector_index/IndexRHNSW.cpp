@@ -10,10 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <algorithm>
-#include <cassert>
 #include <chrono>
-#include <iterator>
-#include <utility>
+#include <string>
 #include <vector>
 
 #include "common/Exception.h"
@@ -32,7 +30,7 @@ IndexRHNSW::Serialize(const Config& config) {
 
     try {
         MemoryIOWriter writer;
-        writer.name = this->index_type() + "_Index";
+        writer.name = std::string(this->index_type()) + "_Index";
         faiss::write_index(index_.get(), &writer);
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
@@ -49,7 +47,7 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
     try {
         Assemble(const_cast<BinarySet&>(index_binary));
         MemoryIOReader reader;
-        reader.name = this->index_type() + "_Index";
+        reader.name = std::string(this->index_type()) + "_Index";
         auto binary = index_binary.GetByName(reader.name);
 
         reader.total = static_cast<size_t>(binary->size);
@@ -105,7 +103,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
     GET_TENSOR_DATA(dataset_ptr)
-    auto k = config[meta::TOPK].get<int64_t>();
+    auto k = GetMetaTopk(config);
     auto result_count = rows * k;
 
     auto p_id = static_cast<int64_t*>(malloc(result_count * sizeof(int64_t)));
@@ -117,7 +115,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
 
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
 
-    real_index->hnsw.efSearch = (config[IndexParams::ef].get<int64_t>());
+    real_index->hnsw.efSearch = GetIndexParamEf(config);
 
     std::chrono::high_resolution_clock::time_point query_start, query_end;
     query_start = std::chrono::high_resolution_clock::now();
@@ -138,15 +136,10 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
         }
     }
 #endif
-    //     LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    // LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 
-    MapOffsetToUid(p_id, result_count);
-
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
-    return ret_ds;
+    return GenResultDataset(p_id, p_dist);
 }
 
 int64_t
@@ -191,10 +184,9 @@ IndexRHNSW::ClearStatistics() {
 }
 #endif
 
-void
-IndexRHNSW::UpdateIndexSize() {
-    KNOWHERE_THROW_MSG(
-        "IndexRHNSW has no implementation of UpdateIndexSize, please use IndexRHNSW(Flat/SQ/PQ) instead!");
+int64_t
+IndexRHNSW::Size() {
+    KNOWHERE_THROW_MSG("IndexRHNSW has no implementation of Size, please use IndexRHNSW(Flat/SQ/PQ) instead!");
 }
 
 /*

@@ -10,14 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include <iostream>
 #include <thread>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/common/Timer.h"
 #include "knowhere/index/IndexType.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/IndexIVFHNSW.h"
+#include "knowhere/index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #include "unittest/Helper.h"
@@ -32,9 +30,9 @@ class IVFHNSWTest : public DataGen,
  protected:
     void
     SetUp() override {
+        Init_with_default();
         std::tie(index_type_, index_mode_) = GetParam();
-        Generate(dim, nb, nq);
-        index_ = IndexFactory(index_type_, index_mode_);
+        index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type_, index_mode_);
         conf_ = ParamGenerator::GetInstance().Gen(index_type_);
     }
 
@@ -49,13 +47,13 @@ class IVFHNSWTest : public DataGen,
     knowhere::IndexType index_type_;
     knowhere::IndexMode index_mode_;
     knowhere::Config conf_;
-    knowhere::IVFPtr index_ = nullptr;
+    knowhere::VecIndexPtr index_ = nullptr;
 };
 
-INSTANTIATE_TEST_CASE_P(IVFParameters,
-                        IVFHNSWTest,
-                        Values(std::make_tuple(knowhere::IndexEnum::INDEX_FAISS_IVFHNSW,
-                                               knowhere::IndexMode::MODE_CPU)));
+INSTANTIATE_TEST_CASE_P(
+    IVFParameters,
+    IVFHNSWTest,
+    Values(std::make_tuple(knowhere::IndexEnum::INDEX_FAISS_IVFHNSW, knowhere::IndexMode::MODE_CPU)));
 
 TEST_P(IVFHNSWTest, ivfhnsw_basic_cpu) {
     assert(!xb.empty());
@@ -71,22 +69,31 @@ TEST_P(IVFHNSWTest, ivfhnsw_basic_cpu) {
     index_->AddWithoutIds(base_dataset, conf_);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
+    ASSERT_GT(index_->Size(), 0);
 
-    auto result = index_->Query(query_dataset, conf_, nullptr);
-    AssertAnns(result, nq, k);
+    auto result = index_->GetVectorById(id_dataset, conf_);
+    AssertVec(result, base_dataset, id_dataset, nq, dim);
+
+    std::vector<int64_t> ids_invalid(nq, nb);
+    auto id_dataset_invalid = knowhere::GenDatasetWithIds(nq, dim, ids_invalid.data());
+    ASSERT_ANY_THROW(index_->GetVectorById(id_dataset_invalid, conf_));
+
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type_);
+    ASSERT_TRUE(adapter->CheckSearch(conf_, index_type_, index_mode_));
+
+    auto result1 = index_->Query(query_dataset, conf_, nullptr);
+    AssertAnns(result1, nq, k);
 }
 
 TEST_P(IVFHNSWTest, ivfhnsw_slice) {
-    {
-        // serialize index
-        index_->Train(base_dataset, conf_);
-        index_->AddWithoutIds(base_dataset, conf_);
-        auto binaryset = index_->Serialize(conf_);
-        // load index
-        index_->Load(binaryset);
-        EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dim(), dim);
-        auto result = index_->Query(query_dataset, conf_, nullptr);
-        AssertAnns(result, nq, k);
-    }
+    knowhere::SetMetaSliceSize(conf_, knowhere::index_file_slice_size);
+    // serialize index
+    index_->BuildAll(base_dataset, conf_);
+    auto binaryset = index_->Serialize(conf_);
+    // load index
+    index_->Load(binaryset);
+    EXPECT_EQ(index_->Count(), nb);
+    EXPECT_EQ(index_->Dim(), dim);
+    auto result = index_->Query(query_dataset, conf_, nullptr);
+    AssertAnns(result, nq, k);
 }

@@ -23,8 +23,9 @@
 
 namespace knowhere {
 
-IndexRHNSWPQ::IndexRHNSWPQ(int d, int pq_m, int M) {
-    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexRHNSWPQ(d, pq_m, M));
+IndexRHNSWPQ::IndexRHNSWPQ(int d, int pq_m, int M, MetricType metric) {
+    faiss::MetricType mt = GetFaissMetricType(metric);
+    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexRHNSWPQ(d, pq_m, M, mt));
 }
 
 BinarySet
@@ -79,9 +80,12 @@ void
 IndexRHNSWPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
         GET_TENSOR_DATA_DIM(dataset_ptr)
-        int32_t efConstruction = config[IndexParams::efConstruction];
+        faiss::MetricType metric_type = GetFaissMetricType(config);
+        int32_t efConstruction = GetIndexParamEfConstruction(config);
+        int32_t pqm = GetIndexParamPQM(config);
+        int32_t hnsw_m = GetIndexParamHNSWM(config);
 
-        auto idx = new faiss::IndexRHNSWPQ(int(dim), config[IndexParams::PQM], config[IndexParams::M]);
+        auto idx = new faiss::IndexRHNSWPQ(int(dim), pqm, hnsw_m, metric_type);
         idx->hnsw.efConstruction = efConstruction;
         index_ = std::shared_ptr<faiss::Index>(idx);
         index_->train(rows, reinterpret_cast<const float*>(p_data));
@@ -90,12 +94,12 @@ IndexRHNSWPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
-void
-IndexRHNSWPQ::UpdateIndexSize() {
+int64_t
+IndexRHNSWPQ::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = dynamic_cast<faiss::IndexRHNSWPQ*>(index_.get())->cal_size();
+    return dynamic_cast<faiss::IndexRHNSWPQ*>(index_.get())->cal_size();
 }
 
 }  // namespace knowhere

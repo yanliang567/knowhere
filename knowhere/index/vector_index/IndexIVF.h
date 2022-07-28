@@ -18,8 +18,8 @@
 #include <faiss/IndexIVF.h>
 
 #include "knowhere/common/Typedef.h"
+#include "knowhere/index/VecIndex.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
-#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace knowhere {
 
@@ -48,12 +48,13 @@ class IVF : public VecIndex, public FaissBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
+    GetVectorById(const DatasetPtr&, const Config&) override;
+
+    DatasetPtr
     Query(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
 
-#if 0
     DatasetPtr
-    QueryById(const DatasetPtr& dataset, const Config& config) override;
-#endif
+    QueryByRange(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
 
     int64_t
     Count() override;
@@ -61,8 +62,8 @@ class IVF : public VecIndex, public FaissBaseIndex {
     int64_t
     Dim() override;
 
-    void
-    UpdateIndexSize() override;
+    int64_t
+    Size() override;
 
 #if 0
     StatisticsPtr
@@ -70,11 +71,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     ClearStatistics() override;
-#endif
-
-#if 0
-    DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
 #endif
 
     virtual void
@@ -92,6 +88,10 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     virtual void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::BitsetView);
+
+    virtual void
+    QueryByRangeImpl(int64_t, const float*, float, float*&, int64_t*&, size_t*&, const Config&,
+                     const faiss::BitsetView);
 
     void
     SealImpl() override;

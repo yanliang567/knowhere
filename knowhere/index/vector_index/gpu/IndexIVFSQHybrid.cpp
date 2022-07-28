@@ -9,12 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <faiss/IndexSQHybrid.h>
-#include <faiss/gpu/GpuCloner.h>
-#include <faiss/gpu/GpuIndexIVF.h>
-#include <faiss/index_factory.h>
 #include <string>
 #include <utility>
+
+#include <faiss/IndexSQHybrid.h>
+#include <faiss/gpu/GpuCloner.h>
+#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -24,20 +24,19 @@
 
 namespace knowhere {
 
-#ifdef KNOWHERE_GPU_VERSION
 
 void
 IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
-    gpu_id_ = config[meta::DEVICEID];
+    gpu_id_ = GetMetaDeviceID(config);
 
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
         faiss::gpu::GpuIndexIVFSQHybridConfig idx_config;
         idx_config.device = static_cast<int32_t>(gpu_id_);
-        int32_t nlist = config[IndexParams::nlist];
-        faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        int32_t nlist = GetIndexParamNlist(config);
+        faiss::MetricType metric_type = GetFaissMetricType(config);
         index_ = std::make_shared<faiss::gpu::GpuIndexIVFSQHybrid>(
             gpu_res->faiss_res.get(), dim, nlist, faiss::QuantizerType::QT_8bit, metric_type, true, idx_config);
         index_->train(rows, reinterpret_cast<const float*>(p_data));
@@ -116,7 +115,7 @@ IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t device_id, const Config& co
 
 VecIndexPtr
 IVFSQHybrid::LoadData(const FaissIVFQuantizerPtr& quantizer_ptr, const Config& config) {
-    int64_t gpu_id = config[meta::DEVICEID];
+    int64_t gpu_id = GetMetaDeviceID(config);
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
         ResScope rs(res, gpu_id, false);
@@ -144,7 +143,7 @@ IVFSQHybrid::LoadData(const FaissIVFQuantizerPtr& quantizer_ptr, const Config& c
 
 FaissIVFQuantizerPtr
 IVFSQHybrid::LoadQuantizer(const Config& config) {
-    auto gpu_id = config[meta::DEVICEID].get<int64_t>();
+    auto gpu_id = GetMetaDeviceID(config);
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
         ResScope rs(res, gpu_id, false);
@@ -254,8 +253,8 @@ IVFSQHybrid::QueryImpl(int64_t n,
     }
 }
 
-void
-IVFSQHybrid::UpdateIndexSize() {
+int64_t
+IVFSQHybrid::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -265,7 +264,7 @@ IVFSQHybrid::UpdateIndexSize() {
     auto nlist = ivfsqh_index->nlist;
     auto d = ivfsqh_index->d;
     // ivf codes, ivf ids, sq trained vectors and quantizer
-    index_size_ = nb * code_size + nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float);
+    return (nb * code_size + nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float));
 }
 
 FaissIVFQuantizer::~FaissIVFQuantizer() {
@@ -275,6 +274,5 @@ FaissIVFQuantizer::~FaissIVFQuantizer() {
     }
 }
 
-#endif
 
 }  // namespace knowhere

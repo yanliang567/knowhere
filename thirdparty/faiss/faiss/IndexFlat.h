@@ -19,6 +19,8 @@ namespace faiss {
 
 /** Index that stores the full vectors and performs exhaustive search */
 struct IndexFlat : IndexFlatCodes {
+    /// database vectors, size ntotal * d
+    std::vector<float> xb;
 
     explicit IndexFlat(idx_t d, MetricType metric = METRIC_L2);
 
@@ -42,14 +44,6 @@ struct IndexFlat : IndexFlatCodes {
             float radius,
             RangeSearchResult* result,
             const BitsetView bitset = nullptr) const override;
-
-    void range_search(
-            idx_t n,
-            const float* x,
-            float radius,
-            std::vector<RangeSearchPartialResult*>& result,
-            size_t buffer_size,
-            const BitsetView bitset = nullptr); // const override
 
     void reconstruct(idx_t key, float* recons) const override;
 

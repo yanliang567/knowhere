@@ -30,7 +30,7 @@ class IndexRHNSWPQ : public IndexRHNSW {
         index_type_ = IndexEnum::INDEX_RHNSWPQ;
     }
 
-    IndexRHNSWPQ(int d, int pq_m, int M);
+    IndexRHNSWPQ(int d, int pq_m, int M, MetricType metric = metric::L2);
 
     BinarySet
     Serialize(const Config& config) override;
@@ -41,8 +41,8 @@ class IndexRHNSWPQ : public IndexRHNSW {
     void
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
-    void
-    UpdateIndexSize() override;
+    int64_t
+    Size() override;
 
  private:
 };

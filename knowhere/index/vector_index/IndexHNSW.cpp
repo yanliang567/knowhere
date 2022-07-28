@@ -18,23 +18,12 @@
 
 #include "common/Exception.h"
 #include "common/Log.h"
-#include "hnswlib/hnswalg.h"
-#include "hnswlib/hnswlib.h"
-#include "hnswlib/space_ip.h"
-#include "hnswlib/space_l2.h"
+#include "hnswlib/hnswlib/hnswalg.h"
 #include "index/vector_index/IndexHNSW.h"
 #include "index/vector_index/adapter/VectorAdapter.h"
 #include "index/vector_index/helpers/FaissIO.h"
 
 namespace knowhere {
-
-// void
-// normalize_vector(float* data, float* norm_array, size_t dim) {
-//     float norm = 0.0f;
-//     for (int i = 0; i < dim; i++) norm += data[i] * data[i];
-//     norm = 1.0f / (sqrtf(norm) + 1e-30f);
-//     for (int i = 0; i < dim; i++) norm_array[i] = data[i] * norm;
-// }
 
 BinarySet
 IndexHNSW::Serialize(const Config& config) {
@@ -68,7 +57,7 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
-        index_->stats_enable = (STATISTICS_LEVEL >= 3);
+        index_->stats_enable_ = (STATISTICS_LEVEL >= 3);
         index_->loadIndex(reader);
 #if 0
         auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);
@@ -77,8 +66,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
             hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
         }
 #endif
-        //         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
-        //         LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
+        // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
+        // LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -87,21 +76,20 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 void
 IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
-        auto dim = dataset_ptr->Get<int64_t>(meta::DIM);
-        auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+        GET_TENSOR_DATA_DIM(dataset_ptr)
 
         hnswlib::SpaceInterface<float>* space;
-        std::string metric_type = config[Metric::TYPE];
-        if (metric_type == Metric::L2) {
+        std::string metric_type = GetMetaMetricType(config);
+        if (metric_type == metric::L2) {
             space = new hnswlib::L2Space(dim);
-        } else if (metric_type == Metric::IP) {
+        } else if (metric_type == metric::IP) {
             space = new hnswlib::InnerProductSpace(dim);
         } else {
             KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
         }
-        index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
-                                                                   config[IndexParams::efConstruction].get<int64_t>());
-        index_->stats_enable = (STATISTICS_LEVEL >= 3);
+        index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, GetIndexParamHNSWM(config),
+                                                                   GetIndexParamEfConstruction(config));
+        index_->stats_enable_ = (STATISTICS_LEVEL >= 3);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -127,8 +115,25 @@ IndexHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
         hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
     }
 #endif
-    //     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
-    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
+    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+}
+
+DatasetPtr
+IndexHNSW::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    GET_DATA_WITH_IDS(dataset_ptr)
+
+    float* p_x = (float*)malloc(sizeof(float) * dim * rows);
+    for (int64_t i = 0; i < rows; i++) {
+        int64_t id = p_ids[i];
+        KNOWHERE_THROW_IF_NOT_FMT(id >= 0 && id < index_->cur_element_count, "invalid id %ld", id);
+        memcpy(p_x + i * dim, index_->getDataByInternalId(id), dim * sizeof(float));
+    }
+    return GenResultDataset(p_x);
 }
 
 DatasetPtr
@@ -138,7 +143,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     }
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    size_t k = config[meta::TOPK].get<int64_t>();
+    auto k = GetMetaTopk(config);
     size_t id_size = sizeof(int64_t) * k;
     size_t dist_size = sizeof(float) * k;
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
@@ -148,11 +153,11 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     if (STATISTICS_LEVEL >= 3) {
         query_stats.resize(rows);
         for (auto i = 0; i < rows; ++i) {
-            query_stats[i].target_level = hnsw_stats->target_level;
+            query_stats[i].target_level_ = hnsw_stats->target_level;
         }
     }
 
-    index_->setEf(config[IndexParams::ef].get<int64_t>());
+    index_->setEf(GetIndexParamEf(config));
     bool transform = (index_->metric_type_ == 1);  // InnerProduct: 1
 
     std::chrono::high_resolution_clock::time_point query_start, query_end;
@@ -180,7 +185,6 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
             rst.pop();
             idx--;
         }
-        MapOffsetToUid(p_single_id, rst_size);
 
         for (idx = rst_size; idx < k; idx++) {
             p_single_dis[idx] = float(1.0 / 0.0);
@@ -214,13 +218,63 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         }
     }
 #endif
-    //     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
-    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
+    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
-    return ret_ds;
+    return GenResultDataset(p_id, p_dist);
+}
+
+DatasetPtr
+IndexHNSW::QueryByRange(const DatasetPtr& dataset,
+                        const Config& config,
+                        const faiss::BitsetView bitset) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+    GET_TENSOR_DATA_DIM(dataset)
+
+    auto range_k = GetIndexParamHNSWK(config);
+    auto radius = GetMetaRadius(config);
+    index_->setEf(GetIndexParamEf(config));
+    bool is_IP = (index_->metric_type_ == 1);  // InnerProduct: 1
+
+    if (!is_IP) {
+        radius *= radius;
+    }
+
+    std::vector<std::vector<int64_t>> result_id_array(rows);
+    std::vector<std::vector<float>> result_dist_array(rows);
+    std::vector<size_t> result_lims(rows + 1, 0);
+
+//#pragma omp parallel for
+    for (unsigned int i = 0; i < rows; ++i) {
+        auto single_query = (float*)p_data + i * dim;
+
+        auto dummy_stat = hnswlib::StatisticsInfo();
+        auto rst = index_->searchRange(single_query, range_k, (is_IP ? 1.0f - radius : radius), bitset, dummy_stat);
+
+        for (auto& p : rst) {
+            result_dist_array[i].push_back(is_IP ? (1 - p.first) : p.first);
+            result_id_array[i].push_back(p.second);
+        }
+        result_lims[i+1] = result_lims[i] + rst.size();
+    }
+
+    LOG_KNOWHERE_DEBUG_ << "Range search radius: " << radius << ", result num: " << result_lims.back();
+
+    auto p_id = static_cast<int64_t*>(malloc(result_lims.back() * sizeof(int64_t)));
+    auto p_dist = static_cast<float*>(malloc(result_lims.back() * sizeof(float)));
+    auto p_lims = static_cast<size_t*>(malloc((rows + 1) * sizeof(size_t)));
+
+    for (int64_t i = 0; i < rows; i++) {
+        size_t start = result_lims[i];
+        size_t size = result_lims[i+1] - result_lims[i];
+        memcpy(p_id + start, result_id_array[i].data(), size * sizeof(int64_t));
+        memcpy(p_dist + start, result_dist_array[i].data(), size * sizeof(float));
+    }
+    memcpy(p_lims, result_lims.data(), (rows + 1) * sizeof(size_t));
+
+    return GenResultDataset(p_id, p_dist, p_lims);
 }
 
 int64_t
@@ -239,12 +293,12 @@ IndexHNSW::Dim() {
     return (*static_cast<size_t*>(index_->dist_func_param_));
 }
 
-void
-IndexHNSW::UpdateIndexSize() {
+int64_t
+IndexHNSW::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = index_->cal_size();
+    return index_->cal_size();
 }
 
 #if 0

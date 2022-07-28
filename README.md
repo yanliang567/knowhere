@@ -15,8 +15,10 @@ All Linux distributions are available for Knowhere development. However, a major
 Here's a list of verified OS types where Knowhere can successfully build and run:
 
 - Ubuntu 18.04
+- CentOS 7
 - MacOS (x86_64)
 - MacOS (Apple Silicon)
+- MinGW64
 
 ## Building Knowhere From Source Code
 
@@ -29,14 +31,50 @@ $ ./scripts/install_deps.sh
 #### Build From Source Code
 
 ```bash
-$ ./build.sh
+$ ./build.sh -t Release
 ```
 
-## Running Unit Tests
-
-To run unit tests:
+#### Running Unit Tests
 
 ```bash
-$ ./build.sh -t Release -u && cmake_build/unittest/test_knowhere
+$ ./build.sh -t Release -u && output/unittest/test_knowhere
+```
+
+#### Clean up
+
+```bash
+$ ./build.sh -r
+```
+
+## GEN PYTHON WHEEL
+
+install dependency:
+
+```
+sudo apt install swig python3-dev
+```
+
+after build knowhere:
+
+```bash
+cd python
+python3 setup.py bdist_wheel
+```
+
+install knowhere wheel:
+
+```bash
+pip3 install dist/knowhere-1.0.0-cp38-cp38-linux_x86_64.whl
+```
+
+clean
+
+```bash
+cd python
+rm -rf build
+rm -rf dist
+rm -rf knowhere.egg-info
+rm knowhere/knowhere_wrap.cpp
+rm knowhere/swigknowhere.py
 ```
 

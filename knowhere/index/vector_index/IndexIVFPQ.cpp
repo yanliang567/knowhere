@@ -35,11 +35,10 @@ void
 IVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    faiss::MetricType metric_type = GetFaissMetricType(config);
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
-    auto index = std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
-                                                     config[IndexParams::m].get<int64_t>(),
-                                                     config[IndexParams::nbits].get<int64_t>(), metric_type);
+    auto index = std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, GetIndexParamNlist(config),
+                                                     GetIndexParamM(config), GetIndexParamNbits(config), metric_type);
     index->own_fields = true;
     index->train(rows, reinterpret_cast<const float*>(p_data));
     index_ = index;
@@ -73,7 +72,7 @@ IVFPQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 std::shared_ptr<faiss::IVFSearchParameters>
 IVFPQ::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFPQSearchParameters>();
-    params->nprobe = config[IndexParams::nprobe];
+    params->nprobe = GetIndexParamNprobe(config);
     // params->scan_table_threshold = config["scan_table_threhold"]
     // params->polysemous_ht = config["polysemous_ht"]
     // params->max_codes = config["max_codes"]
@@ -81,8 +80,8 @@ IVFPQ::GenParams(const Config& config) {
     return params;
 }
 
-void
-IVFPQ::UpdateIndexSize() {
+int64_t
+IVFPQ::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -103,7 +102,7 @@ IVFPQ::UpdateIndexSize() {
         precomputed_table = 0;
     }
 #endif
-    index_size_ = capacity + centroid_table + precomputed_table;
+    return (capacity + centroid_table + precomputed_table);
 }
 
 }  // namespace knowhere

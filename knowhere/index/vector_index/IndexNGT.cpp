@@ -124,7 +124,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
     }
     GET_TENSOR_DATA(dataset_ptr);
 
-    int k = config[meta::TOPK].get<int>();
+    auto k = GetMetaTopk(config);
     auto epsilon = config[IndexParams::epsilon].get<float>();
     auto edge_size = config[IndexParams::max_search_edges].get<int>();
     if (edge_size == -1) {  // pass -1
@@ -186,10 +186,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         index_->deleteObject(object);
     }
 
-    auto res_ds = std::make_shared<Dataset>();
-    res_ds->Set(meta::IDS, p_id);
-    res_ds->Set(meta::DISTANCE, p_dist);
-    return res_ds;
+    return GenResultDataset(p_id, p_dist);
 }
 
 int64_t
@@ -208,9 +205,9 @@ IndexNGT::Dim() {
     return index_->getDimension();
 }
 
-void
-IndexNGT::UpdateIndexSize() {
-    KNOWHERE_THROW_MSG("IndexNGT has no implementation of UpdateIndexSize, please use IndexNGT(PANNG/ONNG) instead!");
+int64_t
+IndexNGT::Size() {
+    KNOWHERE_THROW_MSG("IndexNGT has no implementation of Size, please use IndexNGT(PANNG/ONNG) instead!");
 }
 
 }  // namespace knowhere

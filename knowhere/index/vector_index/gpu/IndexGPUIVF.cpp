@@ -30,15 +30,15 @@ namespace knowhere {
 void
 GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
-    gpu_id_ = config[meta::DEVICEID];
+    gpu_id_ = GetMetaDeviceID(config);
 
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
         idx_config.device = static_cast<int32_t>(gpu_id_);
-        int32_t nlist = config[IndexParams::nlist];
-        faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        int32_t nlist = GetIndexParamNlist(config);
+        faiss::MetricType metric_type = GetFaissMetricType(config);
         index_ = std::make_shared<faiss::gpu::GpuIndexIVFFlat>(gpu_res->faiss_res.get(), dim, nlist, metric_type,
                                                                idx_config);
         index_->train(rows, reinterpret_cast<const float*>(p_data));
@@ -77,6 +77,19 @@ VecIndexPtr
 GPUIVF::CopyGpuToGpu(const int64_t device_id, const Config& config) {
     auto host_index = CopyGpuToCpu(config);
     return std::static_pointer_cast<IVF>(host_index)->CopyCpuToGpu(device_id, config);
+}
+
+int64_t
+GPUIVF::Size() {
+    auto host_index = CopyGpuToCpu(Config());
+    return host_index->Size();
+}
+
+DatasetPtr
+GPUIVF::QueryByRange(const DatasetPtr& dataset,
+                     const Config& config,
+                     const faiss::BitsetView bitset) {
+    KNOWHERE_THROW_MSG("gpu range search not implemented");
 }
 
 BinarySet
@@ -138,7 +151,7 @@ GPUIVF::QueryImpl(int64_t n,
                   const faiss::BitsetView bitset) {
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     if (device_index) {
-        device_index->nprobe = std::min(static_cast<int>(config[IndexParams::nprobe]), device_index->nlist);
+        device_index->nprobe = std::min(static_cast<int>(GetIndexParamNprobe(config)), device_index->nlist);
         ResScope rs(res_, gpu_id_);
 
         // if query size > 2048 we search by blocks to avoid malloc issue

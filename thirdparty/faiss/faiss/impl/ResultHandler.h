@@ -125,12 +125,11 @@ struct HeapResultHandler {
         for (int64_t i = i0; i < i1; i++) {
             T* heap_dis = heap_dis_tab + i * k;
             TI* heap_ids = heap_ids_tab + i * k;
-            T thresh = heap_dis[0];
             const T* dis_tab_i = dis_tab + (j1 - j0) * (i - i0) - j0;
+            T thresh = heap_dis[0];
             for (size_t j = j0; j < j1; j++) {
-                if (!bitset || !bitset.test(j)) {
+                if (bitset.empty() || !bitset.test(j)) {
                     T dis = dis_tab_i[j];
-                    // T dis = *dis_tab++;
                     if (C::cmp(thresh, dis)) {
                         heap_replace_top<C>(k, heap_dis, heap_ids, dis, j);
                         thresh = heap_dis[0];
@@ -369,7 +368,7 @@ struct ReservoirResultHandler {
             ReservoirTopN<C>& reservoir = reservoirs[i - i0];
             const T* dis_tab_i = dis_tab + (j1 - j0) * (i - i0) - j0;
             for (size_t j = j0; j < j1; j++) {
-                if (!bitset || !bitset.test(j)) {
+                if (bitset.empty() || !bitset.test(j)) {
                     T dis = dis_tab_i[j];
                     reservoir.add(dis, j);
                 }
@@ -472,7 +471,8 @@ struct RangeSearchResultHandler {
 
     /// add results for query i0..i1 and j0..j1
 
-    void add_results(size_t j0, size_t j1, const T* dis_tab) {
+    void add_results(size_t j0, size_t j1, const T* dis_tab,
+                     BitsetView bitset = nullptr) {
         RangeSearchPartialResult* pres;
         // there is one RangeSearchPartialResult structure per j0
         // (= block of columns of the large distance matrix)
@@ -496,12 +496,14 @@ struct RangeSearchResultHandler {
         for (size_t i = i0; i < i1; i++) {
             const float* ip_line = dis_tab + (i - i0) * (j1 - j0);
             RangeQueryResult& qres = pres->new_result(i);
-
             for (size_t j = j0; j < j1; j++) {
-                float dis = *ip_line++;
-                if (C::cmp(radius, dis)) {
-                    qres.add(dis, j);
+                if (bitset.empty() || !bitset.test(j)) {
+                    float dis = *ip_line;
+                    if (C::cmp(radius, dis)) {
+                        qres.add(dis, j);
+                    }
                 }
+                ip_line++;
             }
         }
     }

@@ -31,7 +31,7 @@ class IndexRHNSWFlat : public IndexRHNSW {
         index_type_ = IndexEnum::INDEX_RHNSWFlat;
     }
 
-    IndexRHNSWFlat(int d, int M, MetricType metric = Metric::L2);
+    IndexRHNSWFlat(int d, int M, MetricType metric = metric::L2);
 
     BinarySet
     Serialize(const Config& config) override;
@@ -42,8 +42,8 @@ class IndexRHNSWFlat : public IndexRHNSW {
     void
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
-    void
-    UpdateIndexSize() override;
+    int64_t
+    Size() override;
 };
 
 }  // namespace knowhere

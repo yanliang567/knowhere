@@ -17,15 +17,14 @@
 #include <string>
 #include <vector>
 
-#include "faiss/FaissHook.h"
+#include "knowhere/archive/KnowhereConfig.h"
 #include "knowhere/common/Dataset.h"
 #include "knowhere/common/Log.h"
 
 class DataGen {
  public:
     DataGen() {
-        std::string cpu_flag;
-        faiss::hook_init(cpu_flag);
+        knowhere::KnowhereConfig::SetSimdType(knowhere::KnowhereConfig::SimdType::AUTO);
     }
 
  protected:
@@ -38,7 +37,7 @@ class DataGen {
  protected:
     int nb = 10000;
     int nq = 10;
-    int dim = 64;
+    int dim = 128;
     int k = 10;
     int buffer_size = 16384;
     float radius = 2.8;
@@ -47,11 +46,12 @@ class DataGen {
     std::vector<uint8_t> xb_bin;
     std::vector<uint8_t> xq_bin;
     std::vector<int64_t> ids;
-    std::vector<int64_t> xids;
     knowhere::DatasetPtr base_dataset = nullptr;
     knowhere::DatasetPtr query_dataset = nullptr;
     knowhere::DatasetPtr id_dataset = nullptr;
-    knowhere::DatasetPtr xid_dataset = nullptr;
+
+    std::vector<uint8_t> bitset_data;
+    faiss::BitsetViewPtr bitset;
 };
 
 extern void
@@ -59,7 +59,6 @@ GenAll(const int64_t dim,
        const int64_t nb,
        std::vector<float>& xb,
        std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids,
        const int64_t nq,
        std::vector<float>& xq);
 
@@ -68,7 +67,6 @@ GenAll(const int64_t dim,
        const int64_t nb,
        std::vector<uint8_t>& xb,
        std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids,
        const int64_t nq,
        std::vector<uint8_t>& xq);
 
@@ -79,7 +77,6 @@ GenBase(const int64_t dim,
         int64_t* ids,
         const int64_t nq,
         const void* xq,
-        int64_t* xids,
         const bool is_binary);
 
 enum class CheckMode {
@@ -95,26 +92,30 @@ AssertAnns(const knowhere::DatasetPtr& result,
            const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
+AssertDist(const knowhere::DatasetPtr& result,
+           const knowhere::MetricType& metric,
+           const int nq,
+           const int k);
+
+void
 AssertVec(const knowhere::DatasetPtr& result,
           const knowhere::DatasetPtr& base_dataset,
           const knowhere::DatasetPtr& id_dataset,
           const int n,
-          const int dim,
-          const CheckMode check_mode = CheckMode::CHECK_EQUAL);
+          const int dim);
 
 void
 AssertBinVec(const knowhere::DatasetPtr& result,
              const knowhere::DatasetPtr& base_dataset,
              const knowhere::DatasetPtr& id_dataset,
              const int n,
-             const int dim,
-             const CheckMode check_mode = CheckMode::CHECK_EQUAL);
+             const int dim);
+
+void
+normalize(float* vec, int64_t n, int64_t dim);
 
 void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k);
-
-void
-ReleaseQueryResult(const knowhere::DatasetPtr& result);
 
 struct FileIOWriter {
     std::fstream fs;
@@ -161,11 +162,44 @@ struct FileIOReader {
     }
 };
 
-void
-Load_nns_graph(std::vector<std::vector<int64_t>>& final_graph_, const char* filename);
+inline void
+set_bit(uint8_t* data, size_t idx) {
+    data[idx >> 3] |= 0x1 << (idx & 0x7);
+}
 
-float*
-fvecs_read(const char* fname, size_t* d_out, size_t* n_out);
+inline void
+clear_bit(uint8_t* data, size_t idx) {
+    data[idx >> 3] &= ~(0x1 << (idx & 0x7));
+}
 
-int*
-ivecs_read(const char* fname, size_t* d_out, size_t* n_out);
+template <typename T_>
+struct CMin {
+    typedef T_ T;
+    inline static bool cmp(T a, T b) {
+        return a < b;
+    }
+};
+
+template <typename T_>
+struct CMax {
+    typedef T_ T;
+    inline static bool cmp(T a, T b) {
+        return a > b;
+    }
+};
+
+std::string
+temp_path(const char* path);
+
+#ifdef __MINGW64__
+
+uint32_t
+lrand48();
+
+float
+drand48();
+
+int64_t
+random();
+
+#endif

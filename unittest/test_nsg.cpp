@@ -45,19 +45,20 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
         index_ = std::make_shared<knowhere::NSG_NM>();
 
         train_conf = knowhere::Config{
+            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
             {knowhere::meta::DIM, 256},
-            {knowhere::IndexParams::nlist, 163},
-            {knowhere::IndexParams::nprobe, 8},
-            {knowhere::IndexParams::knng, 20},
-            {knowhere::IndexParams::search_length, 40},
-            {knowhere::IndexParams::out_degree, 30},
-            {knowhere::IndexParams::candidate, 100},
-            {knowhere::Metric::TYPE, knowhere::Metric::L2}};
+            {knowhere::indexparam::NLIST, 163},
+            {knowhere::indexparam::NPROBE, 8},
+            {knowhere::indexparam::KNNG, 20},
+            {knowhere::indexparam::SEARCH_LENGTH, 40},
+            {knowhere::indexparam::OUT_DEGREE, 30},
+            {knowhere::indexparam::CANDIDATE, 100},
+        };
 
         search_conf = knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
             {knowhere::meta::TOPK, k},
             {knowhere::IndexParams::search_length, 30},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
         };
     }
 
@@ -83,15 +84,15 @@ TEST_F(NSGInterfaceTest, basic_test) {
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
 
-    train_conf[knowhere::meta::DEVICEID] = -1;
+    knowhere::SetMetaDeviceID(train_conf, -1);
     index_->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
     knowhere::BinarySet bs = index_->Serialize(search_conf);
 
-    int64_t dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
-    int64_t rows = base_dataset->Get<int64_t>(knowhere::meta::ROWS);
-    auto raw_data = base_dataset->Get<const void*>(knowhere::meta::TENSOR);
+    int64_t dim = knowhere::GetDatasetDim(base_dataset);
+    int64_t rows = knowhere::GetDatasetRows(base_dataset);
+    auto raw_data = knowhere::GetDatasetTensor(base_dataset);
     knowhere::BinaryPtr bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
@@ -104,15 +105,15 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     /* test NSG GPU train */
     auto new_index = std::make_shared<knowhere::NSG_NM>(DEVICE_GPU0);
-    train_conf[knowhere::meta::DEVICEID] = DEVICE_GPU0;
+    knowhere::SetMetaDeviceID(train_conf, DEVICE_GPU0);
     new_index->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
     bs = new_index->Serialize(search_conf);
 
-    dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
-    rows = base_dataset->Get<int64_t>(knowhere::meta::ROWS);
-    raw_data = base_dataset->Get<const void*>(knowhere::meta::TENSOR);
+    dim = knowhere::GetDatasetDim(base_dataset);
+    rows = knowhere::GetDatasetRows(base_dataset);
+    raw_data = knowhere::GetDatasetTensor(base_dataset);
     bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
@@ -145,15 +146,15 @@ TEST_F(NSGInterfaceTest, compare_test) {
 TEST_F(NSGInterfaceTest, delete_test) {
     assert(!xb.empty());
 
-    train_conf[knowhere::meta::DEVICEID] = DEVICE_GPU0;
+    knowhere::SetMetaDeviceID(train_conf, DEVICE_GPU0);
     index_->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
     knowhere::BinarySet bs = index_->Serialize(search_conf);
 
-    int64_t dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
-    int64_t rows = base_dataset->Get<int64_t>(knowhere::meta::ROWS);
-    auto raw_data = base_dataset->Get<const void*>(knowhere::meta::TENSOR);
+    int64_t dim = knowhere::GetDatasetDim(base_dataset);
+    int64_t rows = knowhere::GetDatasetRows(base_dataset);
+    auto raw_data = knowhere::GetDatasetTensor(base_dataset);
     knowhere::BinaryPtr bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
@@ -163,7 +164,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
 
     auto result = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result, nq, k);
-    auto I_before = result->Get<int64_t*>(knowhere::meta::IDS);
+    auto I_before = GetDatasetIDs(result);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
@@ -171,9 +172,9 @@ TEST_F(NSGInterfaceTest, delete_test) {
     // Serialize and Load before Query
     bs = index_->Serialize(search_conf);
 
-    dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
-    rows = base_dataset->Get<int64_t>(knowhere::meta::ROWS);
-    raw_data = base_dataset->Get<const void*>(knowhere::meta::TENSOR);
+    dim = knowhere::GetDatasetDim(base_dataset);
+    rows = knowhere::GetDatasetRows(base_dataset);
+    raw_data = knowhere::GetDatasetTensor(base_dataset);
     bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
@@ -182,14 +183,10 @@ TEST_F(NSGInterfaceTest, delete_test) {
     index_->Load(bs);
 
     // search xq with delete
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
-    for (int i = 0; i < nq; i++) {
-        bitset->set(i);
-    }
-    auto result_after = index_->Query(query_dataset, search_conf, bitset);
+    auto result_after = index_->Query(query_dataset, search_conf, *bitset);
 
     AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
-    auto I_after = result_after->Get<int64_t*>(knowhere::meta::IDS);
+    auto I_after = GetDatasetIDs(result_after);
 
     // First vector deleted
     for (int i = 0; i < nq; i++) {
@@ -206,15 +203,15 @@ TEST_F(NSGInterfaceTest, slice_test) {
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
 
-    train_conf[knowhere::meta::DEVICEID] = -1;
+    knowhere::SetMetaDeviceID(train_conf, -1);
     index_->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
     knowhere::BinarySet bs = index_->Serialize(search_conf);
 
-    int64_t dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
-    int64_t rows = base_dataset->Get<int64_t>(knowhere::meta::ROWS);
-    auto raw_data = base_dataset->Get<const void*>(knowhere::meta::TENSOR);
+    int64_t dim = knowhere::GetDatasetDim(base_dataset);
+    int64_t rows = knowhere::GetDatasetRows(base_dataset);
+    auto raw_data = knowhere::GetDatasetTensor(base_dataset);
     knowhere::BinaryPtr bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);
@@ -227,15 +224,15 @@ TEST_F(NSGInterfaceTest, slice_test) {
 
     /* test NSG GPU train */
     auto new_index_1 = std::make_shared<knowhere::NSG_NM>(DEVICE_GPU0);
-    train_conf[knowhere::meta::DEVICEID] = DEVICE_GPU0;
+    knowhere::SetMetaDeviceID(train_conf, DEVICE_GPU0);
     new_index_1->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
     bs = new_index_1->Serialize(search_conf);
 
-    dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
-    rows = base_dataset->Get<int64_t>(knowhere::meta::ROWS);
-    raw_data = base_dataset->Get<const void*>(knowhere::meta::TENSOR);
+    dim = knowhere::GetDatasetDim(base_dataset);
+    rows = knowhere::GetDatasetRows(base_dataset);
+    raw_data = knowhere::GetDatasetTensor(base_dataset);
     bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
     bptr->size = dim * rows * sizeof(float);

@@ -11,10 +11,10 @@
 
 #include <cmath>
 #include <limits>
-#include <memory>
 #include <string>
 #include <vector>
 
+#include "common/Exception.h"
 #include "common/Log.h"
 #include "index/vector_index/ConfAdapter.h"
 #include "index/vector_index/helpers/IndexParameter.h"
@@ -41,52 +41,60 @@ static const int64_t HNSW_MAX_EFCONSTRUCTION = 512;
 static const int64_t HNSW_MIN_M = 4;
 static const int64_t HNSW_MAX_M = 64;
 static const int64_t HNSW_MAX_EF = 32768;
-static const std::vector<std::string> METRICS{Metric::L2, Metric::IP};
 
-#define CheckIntByRange(key, min, max)                                                                   \
-    if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
-        oricfg[key].get<int64_t>() < min) {                                                              \
-        return false;                                                                                    \
-    }
+static const std::vector<MetricType> default_metric_array{metric::L2, metric::IP};
+static const std::vector<MetricType> default_binary_metric_array{metric::HAMMING, metric::JACCARD,
+                                                                 metric::TANIMOTO, metric::SUBSTRUCTURE,
+                                                                 metric::SUPERSTRUCTURE};
 
-#define CheckFloatByRange(key, min, max)                                                             \
-    if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key].get<float>() > max || \
-        oricfg[key].get<float>() < min) {                                                            \
-        return false;                                                                                \
+inline void
+CheckIntegerRange(const Config& cfg, const std::string& key, int64_t min, int64_t max) {
+    if (!cfg.contains(key)) {
+        KNOWHERE_THROW_FORMAT("Param '%s' not exist", key.data());
     }
+    if (!cfg[key].is_number_integer()) {
+        KNOWHERE_THROW_FORMAT("Param '%s' should be an integer", key.data());
+    }
+    int64_t value = GetValueFromConfig<int64_t>(cfg, key);
+    if (value < min || value > max) {
+        KNOWHERE_THROW_FORMAT("Param '%s'(%ld) is not in range [%ld, %ld]", key.data(), value, min, max);
+    }
+}
 
-#define CheckIntByValues(key, container)                                                                 \
-    if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
-        return false;                                                                                    \
-    } else {                                                                                             \
-        auto finder = std::find(std::begin(container), std::end(container), oricfg[key].get<int64_t>()); \
-        if (finder == std::end(container)) {                                                             \
-            return false;                                                                                \
-        }                                                                                                \
+inline void
+CheckFloatRange(const Config& cfg, const std::string& key, float min, float max) {
+    if (!cfg.contains(key)) {
+        KNOWHERE_THROW_FORMAT("Param '%s' not exist", key.data());
     }
+    if (!cfg[key].is_number_float()) {
+        KNOWHERE_THROW_FORMAT("Param '%s' should be a float", key.data());
+    }
+    float value = GetValueFromConfig<float>(cfg, key);
+    if (value < min || value > max) {
+        KNOWHERE_THROW_FORMAT("Param '%s'(%f) is not in range [%f, %f]", key.data(), value, min, max);
+    }
+}
 
-#define CheckStrByValues(key, container)                                                                     \
-    if (!oricfg.contains(key) || !oricfg[key].is_string()) {                                                 \
-        return false;                                                                                        \
-    } else {                                                                                                 \
-        auto finder = std::find(std::begin(container), std::end(container), oricfg[key].get<std::string>()); \
-        if (finder == std::end(container)) {                                                                 \
-            return false;                                                                                    \
-        }                                                                                                    \
+inline void
+CheckMetricType(const Config& cfg, const std::vector<MetricType>& metric_types) {
+    auto type = GetMetaMetricType(cfg);
+    if (std::find(metric_types.begin(), metric_types.end(), type) == metric_types.end()) {
+        KNOWHERE_THROW_FORMAT("Metric type '%s' is not supported for this index type", type.c_str());
     }
+}
 
 bool
-ConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    CheckStrByValues(Metric::TYPE, METRICS);
+ConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckMetricType(cfg, default_metric_array);
+    CheckIntegerRange(cfg, meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     return true;
 }
 
 bool
-ConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+ConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
     const int64_t DEFAULT_MIN_K = 1;
     const int64_t DEFAULT_MAX_K = 16384;
-    CheckIntByRange(meta::TOPK, DEFAULT_MIN_K - 1, DEFAULT_MAX_K);
+    CheckIntegerRange(cfg, meta::TOPK, DEFAULT_MIN_K - 1, DEFAULT_MAX_K);
     return true;
 }
 
@@ -121,50 +129,48 @@ MatchNbits(int64_t size, int64_t nbits) {
 }
 
 bool
-IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+IVFConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::NLIST, MIN_NLIST, MAX_NLIST);
 
     // auto tune params
-    auto rows = oricfg[meta::ROWS].get<int64_t>();
-    auto nlist = oricfg[IndexParams::nlist].get<int64_t>();
-    oricfg[IndexParams::nlist] = MatchNlist(rows, nlist);
+    auto rows = GetMetaRows(cfg);
+    auto nlist = GetIndexParamNlist(cfg);
+    SetIndexParamNlist(cfg, MatchNlist(rows, nlist));
 
-    return ConfAdapter::CheckTrain(oricfg, mode);
+    return ConfAdapter::CheckTrain(cfg, mode);
 }
 
 bool
-IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+IVFConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
     int64_t max_nprobe = MAX_NPROBE;
 #ifdef KNOWHERE_GPU_VERSION
     if (mode == IndexMode::MODE_GPU) {
         max_nprobe = faiss::gpu::getMaxKSelection();
     }
 #endif
-    CheckIntByRange(IndexParams::nprobe, MIN_NPROBE, max_nprobe);
-
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
+    CheckIntegerRange(cfg, indexparam::NPROBE, MIN_NPROBE, max_nprobe);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
 }
 
 bool
-IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    oricfg[IndexParams::nbits] = DEFAULT_NBITS;
-    return IVFConfAdapter::CheckTrain(oricfg, mode);
+IVFSQConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    SetIndexParamNbits(cfg, DEFAULT_NBITS);
+    return IVFConfAdapter::CheckTrain(cfg, mode);
 }
 
 bool
-IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    if (!IVFConfAdapter::CheckTrain(oricfg, mode)) {
+IVFPQConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    if (!IVFConfAdapter::CheckTrain(cfg, mode)) {
         return false;
     }
+    CheckIntegerRange(cfg, indexparam::NBITS, MIN_NBITS, MAX_NBITS);
 
-    CheckIntByRange(IndexParams::nbits, MIN_NBITS, MAX_NBITS);
+    auto rows = GetMetaRows(cfg);
+    auto nbits = cfg.count(indexparam::NBITS) ? GetIndexParamNbits(cfg) : DEFAULT_NBITS;
+    SetIndexParamNbits(cfg, MatchNbits(rows, nbits));
 
-    auto rows = oricfg[meta::ROWS].get<int64_t>();
-    auto nbits = oricfg.count(IndexParams::nbits) ? oricfg[IndexParams::nbits].get<int64_t>() : DEFAULT_NBITS;
-    oricfg[IndexParams::nbits] = MatchNbits(rows, nbits);
-
-    auto m = oricfg[IndexParams::m].get<int64_t>();
-    auto dimension = oricfg[meta::DIM].get<int64_t>();
+    auto m = GetIndexParamM(cfg);
+    auto dimension = GetMetaDim(cfg);
 
     IndexMode ivfpq_mode = mode;
     return CheckPQParams(dimension, m, nbits, ivfpq_mode);
@@ -211,35 +217,165 @@ IVFPQConfAdapter::CheckCPUPQParams(int64_t dimension, int64_t m) {
 }
 
 bool
-IVFHNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+IVFHNSWConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
     // HNSW param check
-    CheckIntByRange(IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
-    CheckIntByRange(IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
+    CheckIntegerRange(cfg, indexparam::EFCONSTRUCTION, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntegerRange(cfg, indexparam::HNSW_M, HNSW_MIN_M, HNSW_MAX_M);
 
     // IVF param check
-    CheckIntByRange(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    CheckIntegerRange(cfg, indexparam::NLIST, MIN_NLIST, MAX_NLIST);
 
     // auto tune params
-    auto rows = oricfg[meta::ROWS].get<int64_t>();
-    auto nlist = oricfg[IndexParams::nlist].get<int64_t>();
-    oricfg[IndexParams::nlist] = MatchNlist(rows, nlist);
+    auto rows = GetMetaRows(cfg);
+    auto nlist = GetIndexParamNlist(cfg);
+    SetIndexParamNlist(cfg, MatchNlist(rows, nlist));
 
-    return ConfAdapter::CheckTrain(oricfg, mode);
+    return ConfAdapter::CheckTrain(cfg, mode);
 }
 
 bool
-IVFHNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+IVFHNSWConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
     // HNSW param check
-    CheckIntByRange(IndexParams::ef, oricfg[meta::TOPK], HNSW_MAX_EF);
-
+    CheckIntegerRange(cfg, indexparam::EF, GetMetaTopk(cfg), HNSW_MAX_EF);
     // IVF param check
-    CheckIntByRange(IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
-
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
+    CheckIntegerRange(cfg, indexparam::NPROBE, MIN_NPROBE, MAX_NPROBE);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
 }
 
 bool
-NSGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+HNSWConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EFCONSTRUCTION, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntegerRange(cfg, indexparam::HNSW_M, HNSW_MIN_M, HNSW_MAX_M);
+    return ConfAdapter::CheckTrain(cfg, mode);
+}
+
+bool
+HNSWConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EF, GetMetaTopk(cfg), HNSW_MAX_EF);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
+}
+
+bool
+RHNSWFlatConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EFCONSTRUCTION, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntegerRange(cfg, indexparam::HNSW_M, HNSW_MIN_M, HNSW_MAX_M);
+    return ConfAdapter::CheckTrain(cfg, mode);
+}
+
+bool
+RHNSWFlatConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EF, GetMetaTopk(cfg), HNSW_MAX_EF);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
+}
+
+bool
+RHNSWPQConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EFCONSTRUCTION, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntegerRange(cfg, indexparam::HNSW_M, HNSW_MIN_M, HNSW_MAX_M);
+
+    auto dimension = GetMetaDim(cfg);
+    if (!IVFPQConfAdapter::CheckCPUPQParams(dimension, GetIndexParamPQM(cfg))) {
+        return false;
+    }
+    return ConfAdapter::CheckTrain(cfg, mode);
+}
+
+bool
+RHNSWPQConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EF, GetMetaTopk(cfg), HNSW_MAX_EF);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
+}
+
+bool
+RHNSWSQConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EFCONSTRUCTION, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntegerRange(cfg, indexparam::HNSW_M, HNSW_MIN_M, HNSW_MAX_M);
+    return ConfAdapter::CheckTrain(cfg, mode);
+}
+
+bool
+RHNSWSQConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EF, GetMetaTopk(cfg), HNSW_MAX_EF);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
+}
+
+bool
+BinIDMAPConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckMetricType(cfg, default_binary_metric_array);
+    CheckIntegerRange(cfg, meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    return true;
+}
+
+bool
+BinIVFConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    static const std::vector<MetricType> metric_array{metric::HAMMING, metric::JACCARD, metric::TANIMOTO};
+    CheckMetricType(cfg, metric_array);
+    CheckIntegerRange(cfg, meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckIntegerRange(cfg, indexparam::NLIST, MIN_NLIST, MAX_NLIST);
+
+    // auto tune params
+    auto rows = GetMetaRows(cfg);
+    auto nlist = GetIndexParamNlist(cfg);
+    SetIndexParamNlist(cfg, MatchNlist(rows, nlist));
+    return true;
+}
+
+bool
+ANNOYConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    // too large of n_trees takes much time, if there is real requirement, change this threshold.
+    static int64_t MIN_N_TREES = 1;
+    static int64_t MAX_N_TREES = 1024;
+    CheckIntegerRange(cfg, indexparam::N_TREES, MIN_N_TREES, MAX_N_TREES);
+    return ConfAdapter::CheckTrain(cfg, mode);
+}
+
+bool
+ANNOYConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
+    static int64_t MIN_SEARCH_K = std::numeric_limits<int64_t>::min();
+    static int64_t MAX_SEARCH_K = std::numeric_limits<int64_t>::max();
+    CheckIntegerRange(cfg, indexparam::SEARCH_K, MIN_SEARCH_K, MAX_SEARCH_K);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
+}
+
+#ifdef KNOWHERE_SUPPORT_NGT
+bool
+NGTPANNGConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EDGE_SIZE, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntegerRange(cfg, indexparam::FORCEDLY_PRUNED_EDGE_SIZE, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntegerRange(cfg, indexparam::SELECTIVELY_PRUNED_EDGE_SIZE, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    if (GetValueFromConfig<int64_t>(cfg, indexparam::SELECTIVELY_PRUNED_EDGE_SIZE) >=
+        GetValueFromConfig<int64_t>(cfg, indexparam::FORCEDLY_PRUNED_EDGE_SIZE)) {
+        return false;
+    }
+    return ConfAdapter::CheckTrain(cfg, mode);
+}
+
+bool
+NGTPANNGConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::MAX_SEARCH_EDGES, -1, NGT_MAX_EDGE_SIZE);
+    CheckFloatRange(cfg, indexparam::EPSILON, -1.0, 1.0);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
+}
+
+bool
+NGTONNGConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::EDGE_SIZE, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntegerRange(cfg, indexparam::OUTGOING_EDGE_SIZE, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntegerRange(cfg, indexparam::INCOMING_EDGE_SIZE, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    return ConfAdapter::CheckTrain(cfg, mode);
+}
+
+bool
+NGTONNGConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
+    CheckIntegerRange(cfg, indexparam::MAX_SEARCH_EDGES, -1, NGT_MAX_EDGE_SIZE);
+    CheckFloatRange(cfg, indexparam::EPSILON, -1.0, 1.0);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
+}
+#endif
+
+#ifdef KNOWHERE_SUPPORT_NSG
+bool
+NSGConfAdapter::CheckTrain(Config& cfg, const IndexMode mode) {
     const int64_t MIN_KNNG = 5;
     const int64_t MAX_KNNG = 300;
     const int64_t MIN_SEARCH_LENGTH = 10;
@@ -249,178 +385,28 @@ NSGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     const int64_t MIN_CANDIDATE_POOL_SIZE = 50;
     const int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
 
-    CheckStrByValues(Metric::TYPE, METRICS);
-    CheckIntByRange(IndexParams::knng, MIN_KNNG, MAX_KNNG);
-    CheckIntByRange(IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
-    CheckIntByRange(IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
-    CheckIntByRange(IndexParams::candidate, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
+    CheckMetricType(cfg, default_metric_array);
+    CheckIntegerRange(cfg, indexparam::KNNG, MIN_KNNG, MAX_KNNG);
+    CheckIntegerRange(cfg, indexparam::SEARCH_LENGTH, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    CheckIntegerRange(cfg, indexparam::OUT_DEGREE, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
+    CheckIntegerRange(cfg, indexparam::CANDIDATE, MIN_CANDIDATE_POOL_SIZE, MAX_CANDIDATE_POOL_SIZE);
 
     // auto tune params
-    oricfg[IndexParams::nlist] = MatchNlist(oricfg[meta::ROWS].get<int64_t>(), 8192);
+    auto rows = GetMetaRows(cfg);
+    SetIndexParamNlist(cfg, MatchNlist(rows, 8192));
 
-    int64_t nprobe = int(oricfg[IndexParams::nlist].get<int64_t>() * 0.1);
-    oricfg[IndexParams::nprobe] = nprobe < 1 ? 1 : nprobe;
-
+    int64_t nprobe = GetIndexParamNlist(cfg) * 0.1;
+    SetIndexParamNprobe(cfg, (nprobe < 1) ? 1 : nprobe);
     return true;
 }
 
 bool
-NSGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+NSGConfAdapter::CheckSearch(Config& cfg, const IndexType type, const IndexMode mode) {
     static int64_t MIN_SEARCH_LENGTH = 1;
     static int64_t MAX_SEARCH_LENGTH = 300;
-
-    CheckIntByRange(IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
-
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
+    CheckIntegerRange(cfg, indexparam::SEARCH_LENGTH, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
+    return ConfAdapter::CheckSearch(cfg, type, mode);
 }
-
-bool
-HNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
-    CheckIntByRange(IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
-
-    return ConfAdapter::CheckTrain(oricfg, mode);
-}
-
-bool
-HNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(IndexParams::ef, oricfg[meta::TOPK], HNSW_MAX_EF);
-
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
-
-bool
-RHNSWFlatConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
-    CheckIntByRange(IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
-
-    return ConfAdapter::CheckTrain(oricfg, mode);
-}
-
-bool
-RHNSWFlatConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(IndexParams::ef, oricfg[meta::TOPK], HNSW_MAX_EF);
-
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
-
-bool
-RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
-    CheckIntByRange(IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
-
-    auto dimension = oricfg[meta::DIM].get<int64_t>();
-
-    if (!IVFPQConfAdapter::CheckCPUPQParams(dimension, oricfg[IndexParams::PQM].get<int64_t>())) {
-        return false;
-    }
-
-    return ConfAdapter::CheckTrain(oricfg, mode);
-}
-
-bool
-RHNSWPQConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(IndexParams::ef, oricfg[meta::TOPK], HNSW_MAX_EF);
-
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
-
-bool
-RHNSWSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
-    CheckIntByRange(IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
-
-    return ConfAdapter::CheckTrain(oricfg, mode);
-}
-
-bool
-RHNSWSQConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(IndexParams::ef, oricfg[meta::TOPK], HNSW_MAX_EF);
-
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
-
-bool
-BinIDMAPConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static const std::vector<std::string> METRICS{Metric::HAMMING, Metric::JACCARD,
-                                                  Metric::TANIMOTO, Metric::SUBSTRUCTURE,
-                                                  Metric::SUPERSTRUCTURE};
-
-    CheckIntByRange(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    CheckStrByValues(Metric::TYPE, METRICS);
-
-    return true;
-}
-
-bool
-BinIVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static const std::vector<std::string> METRICS{Metric::HAMMING, Metric::JACCARD,
-                                                  Metric::TANIMOTO};
-
-    CheckIntByRange(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    CheckIntByRange(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
-    CheckStrByValues(Metric::TYPE, METRICS);
-
-    // auto tune params
-    auto rows = oricfg[meta::ROWS].get<int64_t>();
-    auto nlist = oricfg[IndexParams::nlist].get<int64_t>();
-    oricfg[IndexParams::nlist] = MatchNlist(rows, nlist);
-
-    return true;
-}
-
-bool
-ANNOYConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MIN_NTREES = 1;
-    // too large of n_trees takes much time, if there is real requirement, change this threshold.
-    static int64_t MAX_NTREES = 1024;
-
-    CheckIntByRange(IndexParams::n_trees, MIN_NTREES, MAX_NTREES);
-
-    return ConfAdapter::CheckTrain(oricfg, mode);
-}
-
-bool
-ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(IndexParams::search_k, std::numeric_limits<int64_t>::min(),
-                    std::numeric_limits<int64_t>::max());
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
-
-bool
-NGTPANNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(IndexParams::edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
-    CheckIntByRange(IndexParams::forcedly_pruned_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
-    CheckIntByRange(IndexParams::selectively_pruned_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
-    if (oricfg[IndexParams::selectively_pruned_edge_size].get<int64_t>() >=
-        oricfg[IndexParams::forcedly_pruned_edge_size].get<int64_t>()) {
-        return false;
-    }
-
-    return ConfAdapter::CheckTrain(oricfg, mode);
-}
-
-bool
-NGTPANNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(IndexParams::max_search_edges, -1, NGT_MAX_EDGE_SIZE);
-    CheckFloatByRange(IndexParams::epsilon, -1.0, 1.0);
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
-
-bool
-NGTONNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(IndexParams::edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
-    CheckIntByRange(IndexParams::outgoing_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
-    CheckIntByRange(IndexParams::incoming_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
-
-    return ConfAdapter::CheckTrain(oricfg, mode);
-}
-
-bool
-NGTONNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(IndexParams::max_search_edges, -1, NGT_MAX_EDGE_SIZE);
-    CheckFloatByRange(IndexParams::epsilon, -1.0, 1.0);
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
+#endif
 
 }  // namespace knowhere

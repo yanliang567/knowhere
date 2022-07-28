@@ -178,6 +178,8 @@ struct Index {
      */
     virtual void reconstruct(idx_t key, float* recons) const;
 
+    virtual void reconstruct_without_codes(idx_t key, float* recons) const;
+
     /** Reconstruct vectors i0 to i0 + ni - 1
      *
      * this function may not be defined for some indexes

@@ -13,19 +13,20 @@
 
 include_directories(${KNOWHERE_SOURCE_DIR}/knowhere)
 include_directories(${KNOWHERE_SOURCE_DIR}/thirdparty)
+include_directories(${KNOWHERE_SOURCE_DIR}/thirdparty/faiss)
 include_directories(${KNOWHERE_SOURCE_DIR}/knowhere/utils)
 
 set(KNOWHERE_THIRDPARTY_SRC ${KNOWHERE_SOURCE_DIR}/thirdparty)
 set(external_srcs
         common/Exception.cpp
         common/Timer.cpp
-        common/Utils.cpp
         common/Log.cpp
         ${KNOWHERE_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 
 set(config_srcs
         archive/KnowhereConfig.cpp
+        archive/BruteForce.cpp
         )
 
 if (KNOWHERE_SUPPORT_NGT)
@@ -55,11 +56,10 @@ if (KNOWHERE_SUPPORT_SPTAG)
 endif ()
 
 set(vector_index_srcs
-        index/IndexType.cpp
+        index/VecIndexFactory.cpp
         index/vector_index/adapter/VectorAdapter.cpp
         index/vector_index/helpers/FaissIO.cpp
-        index/vector_index/helpers/IndexParameter.cpp
-        index/vector_index/helpers/DynamicResultSet.cpp
+        index/vector_index/helpers/Slice.cpp
         index/vector_index/ConfAdapter.cpp
         index/vector_index/ConfAdapterMgr.cpp
         index/vector_index/FaissBaseBinaryIndex.cpp
@@ -78,7 +78,6 @@ set(vector_index_srcs
         index/vector_index/IndexRHNSWSQ.cpp
         index/vector_index/IndexRHNSWPQ.cpp
         index/vector_index/Statistics.cpp
-        index/vector_index/VecIndexFactory.cpp
         )
 
 set(vector_offset_index_srcs

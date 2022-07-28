@@ -48,6 +48,40 @@ BinaryIVF::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
+BinaryIVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    GET_DATA_WITH_IDS(dataset_ptr)
+
+    uint8_t* p_x = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_x != nullptr) {
+            free(p_x);
+        }
+    };
+
+    try {
+        p_x = (uint8_t*)malloc(sizeof(uint8_t) * (dim / 8) * rows);
+        auto bin_ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+        bin_ivf_index->make_direct_map(true);
+        for (int64_t i = 0; i < rows; i++) {
+            int64_t id = p_ids[i];
+            KNOWHERE_THROW_IF_NOT_FMT(id >= 0 && id < bin_ivf_index->ntotal, "invalid id %ld", id);
+            bin_ivf_index->reconstruct(id, p_x + i * dim / 8);
+        }
+        return GenResultDataset(p_x);
+    } catch (faiss::FaissException& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+
+DatasetPtr
 BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
@@ -67,7 +101,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     };
 
     try {
-        auto k = config[meta::TOPK].get<int64_t>();
+        auto k = GetMetaTopk(config);
         auto elems = rows * k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
@@ -76,14 +110,47 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         p_dist = static_cast<float*>(malloc(p_dist_size));
 
         QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config, bitset);
-        MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
-        auto ret_ds = std::make_shared<Dataset>();
+        return GenResultDataset(p_id, p_dist);
+    } catch (faiss::FaissException& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
 
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, p_dist);
+DatasetPtr
+BinaryIVF::QueryByRange(const DatasetPtr& dataset,
+                        const Config& config,
+                        const faiss::BitsetView bitset) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+    GET_TENSOR_DATA(dataset)
 
-        return ret_ds;
+    auto radius = GetMetaRadius(config);
+
+    int64_t* p_id = nullptr;
+    float* p_dist = nullptr;
+    size_t* p_lims = nullptr;
+
+    auto release_when_exception = [&]() {
+        if (p_id != nullptr) {
+            free(p_id);
+        }
+        if (p_dist != nullptr) {
+            free(p_dist);
+        }
+        if (p_lims != nullptr) {
+            free(p_lims);
+        }
+    };
+
+    try {
+        QueryByRangeImpl(rows, reinterpret_cast<const uint8_t*>(p_data), radius, p_dist, p_id, p_lims, config, bitset);
+        return GenResultDataset(p_id, p_dist, p_lims);
     } catch (faiss::FaissException& e) {
         release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
@@ -109,8 +176,8 @@ BinaryIVF::Dim() {
     return index_->d;
 }
 
-void
-BinaryIVF::UpdateIndexSize() {
+int64_t
+BinaryIVF::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -120,7 +187,7 @@ BinaryIVF::UpdateIndexSize() {
     auto code_size = bin_ivf_index->code_size;
 
     // binary ivf codes, ids and quantizer
-    index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
+    return (nb * code_size + nb * sizeof(int64_t) + nlist * code_size);
 }
 
 #if 0
@@ -154,8 +221,8 @@ void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    int64_t nlist = config[IndexParams::nlist];
-    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    int64_t nlist = GetIndexParamNlist(config);
+    faiss::MetricType metric_type = GetFaissMetricType(config);
     faiss::IndexBinary* coarse_quantizer = new faiss::IndexBinaryFlat(dim, metric_type);
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, nlist, metric_type);
     index->own_fields = true;
@@ -176,7 +243,7 @@ BinaryIVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 std::shared_ptr<faiss::IVFSearchParameters>
 BinaryIVF::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFSearchParameters>();
-    params->nprobe = config[IndexParams::nprobe];
+    params->nprobe = GetIndexParamNprobe(config);
     // params->max_codes = config["max_code"];
     return params;
 }
@@ -222,13 +289,40 @@ BinaryIVF::QueryImpl(int64_t n,
     }
 #endif
 
-    // if hamming, it need transform int32 to float
+    // convert int32 to float for hamming
     if (ivf_index->metric_type == faiss::METRIC_Hamming) {
         int64_t num = n * k;
         for (int64_t i = 0; i < num; i++) {
             distances[i] = static_cast<float>(i_distances[i]);
         }
     }
+}
+
+void
+BinaryIVF::QueryByRangeImpl(int64_t n,
+                            const uint8_t* data,
+                            float radius,
+                            float*& distances,
+                            int64_t*& labels,
+                            size_t*& lims,
+                            const Config& config,
+                            const faiss::BitsetView bitset) {
+    auto params = GenParams(config);
+    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    ivf_index->nprobe = params->nprobe;
+
+    faiss::RangeSearchResult res(n);
+    index_->range_search(n, data, radius, &res, bitset);
+
+    distances = res.distances;
+    labels = res.labels;
+    lims = res.lims;
+
+    LOG_KNOWHERE_DEBUG_ << "Range search radius: " << radius << ", result num: " << lims[n];
+
+    res.distances = nullptr;
+    res.labels = nullptr;
+    res.lims = nullptr;
 }
 
 }  // namespace knowhere

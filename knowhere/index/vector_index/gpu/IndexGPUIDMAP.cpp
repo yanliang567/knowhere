@@ -104,7 +104,7 @@ GPUIDMAP::QueryImpl(int64_t n,
     ResScope rs(res_, gpu_id_);
 
     // assign the metric type
-    index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    index_->metric_type = GetFaissMetricType(config);
     index_->search(n, data, k, distances, labels, bitset);
 }
 
@@ -113,7 +113,7 @@ GPUIDMAP::GenGraph(const float* data, const int64_t k, GraphType& graph, const C
     int64_t K = k + 1;
     auto ntotal = Count();
 
-    size_t dim = config[meta::DIM];
+    auto dim = GetMetaDim(config);
     auto batch_size = 1000;
     auto tail_batch_size = ntotal % batch_size;
     auto batch_search_count = ntotal / batch_size;

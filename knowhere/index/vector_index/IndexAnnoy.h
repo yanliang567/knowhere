@@ -12,14 +12,17 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "annoy/src/annoylib.h"
 #include "annoy/src/kissrandom.h"
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/VecIndex.h"
 
 namespace knowhere {
+
+using ThreadedBuildPolicy = AnnoyIndexSingleThreadedBuildPolicy;
 
 class IndexAnnoy : public VecIndex {
  public:
@@ -28,16 +31,16 @@ class IndexAnnoy : public VecIndex {
     }
 
     BinarySet
-    Serialize(const Config& config) override;
+    Serialize(const Config&) override;
 
     void
-    Load(const BinarySet& index_binary) override;
+    Load(const BinarySet&) override;
 
     void
-    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override;
+    BuildAll(const DatasetPtr&, const Config&) override;
 
     void
-    Train(const DatasetPtr& dataset_ptr, const Config& config) override {
+    Train(const DatasetPtr&, const Config&) override {
         KNOWHERE_THROW_MSG("Annoy not support build item dynamically, please invoke BuildAll interface.");
     }
 
@@ -47,7 +50,10 @@ class IndexAnnoy : public VecIndex {
     }
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) override;
+    GetVectorById(const DatasetPtr&, const Config&) override;
+
+    DatasetPtr
+    Query(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
 
     int64_t
     Count() override;
@@ -55,11 +61,11 @@ class IndexAnnoy : public VecIndex {
     int64_t
     Dim() override;
 
-    void
-    UpdateIndexSize() override;
+    int64_t
+    Size() override;
 
  private:
-    MetricType metric_type_;
+    std::string metric_type_;
     std::shared_ptr<AnnoyIndexInterface<int64_t, float>> index_ = nullptr;
 };
 

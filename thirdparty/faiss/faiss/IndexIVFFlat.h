@@ -53,6 +53,11 @@ struct IndexIVFFlat : IndexIVF {
     void reconstruct_from_offset(int64_t list_no, int64_t offset, float* recons)
             const override;
 
+    void reconstruct_from_offset_without_codes(
+            int64_t list_no,
+            int64_t offset,
+            float* recons) const override;
+
     void sa_decode(idx_t n, const uint8_t* bytes, float* x) const override;
 
     IndexIVFFlat() {}

@@ -30,14 +30,19 @@ class IVFSQ : public IVF {
         stats = std::make_shared<IVFStatistics>(index_type_);
     }
 
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset, const Config& config) override {
+        KNOWHERE_THROW_MSG("GetVectorById not supported yet");
+    }
+
     void
     Train(const DatasetPtr&, const Config&) override;
 
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&) override;
 
-    void
-    UpdateIndexSize() override;
+    int64_t
+    Size() override;
 };
 
 using IVFSQPtr = std::shared_ptr<IVFSQ>;

@@ -62,10 +62,10 @@ IndexAnnoy::Load(const BinarySet& index_binary) {
     uint64_t dim;
     memcpy(&dim, dim_data->data.get(), static_cast<size_t>(dim_data->size));
 
-    if (metric_type_ == Metric::L2) {
-        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Euclidean, ::Kiss64Random>>(dim);
-    } else if (metric_type_ == Metric::IP) {
-        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::DotProduct, ::Kiss64Random>>(dim);
+    if (metric_type_ == metric::L2) {
+        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Euclidean, ::Kiss64Random, ThreadedBuildPolicy>>(dim);
+    } else if (metric_type_ == metric::IP) {
+        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::DotProduct, ::Kiss64Random, ThreadedBuildPolicy>>(dim);
     } else {
         KNOWHERE_THROW_MSG("metric not supported " + metric_type_);
     }
@@ -89,11 +89,11 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    metric_type_ = config[Metric::TYPE];
-    if (metric_type_ == Metric::L2) {
-        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Euclidean, ::Kiss64Random>>(dim);
-    } else if (metric_type_ == Metric::IP) {
-        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::DotProduct, ::Kiss64Random>>(dim);
+    metric_type_ = GetMetaMetricType(config);
+    if (metric_type_ == metric::L2) {
+        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Euclidean, ::Kiss64Random, ThreadedBuildPolicy>>(dim);
+    } else if (metric_type_ == metric::IP) {
+        index_ = std::make_shared<AnnoyIndex<int64_t, float, ::DotProduct, ::Kiss64Random, ThreadedBuildPolicy>>(dim);
     } else {
         KNOWHERE_THROW_MSG("metric not supported " + metric_type_);
     }
@@ -102,7 +102,24 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         index_->add_item(i, static_cast<const float*>(p_data) + dim * i);
     }
 
-    index_->build(config[IndexParams::n_trees].get<int64_t>());
+    index_->build(GetIndexParamNtrees(config));
+}
+
+DatasetPtr
+IndexAnnoy::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    GET_DATA_WITH_IDS(dataset_ptr)
+
+    float* p_x = (float*)malloc(sizeof(float) * dim * rows);
+    for (int64_t i = 0; i < rows; i++) {
+        int64_t id = p_ids[i];
+        KNOWHERE_THROW_IF_NOT_FMT(id >= 0 && id < index_->get_n_items(), "invalid id %ld", id);
+        index_->get_item(id, p_x + i * dim);
+    }
+    return GenResultDataset(p_x);
 }
 
 DatasetPtr
@@ -112,8 +129,8 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
     }
 
     GET_TENSOR_DATA_DIM(dataset_ptr)
-    auto k = config[meta::TOPK].get<int64_t>();
-    auto search_k = config[IndexParams::search_k].get<int64_t>();
+    auto k = GetMetaTopk(config);
+    auto search_k = GetIndexParamSearchK(config);
     auto all_num = rows * k;
     auto p_id = static_cast<int64_t*>(malloc(all_num * sizeof(int64_t)));
     auto p_dist = static_cast<float*>(malloc(all_num * sizeof(float)));
@@ -133,18 +150,13 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
         memcpy(local_p_id, result.data(), result_num * sizeof(int64_t));
         memcpy(local_p_dist, distances.data(), result_num * sizeof(float));
 
-        MapOffsetToUid(local_p_id, result_num);
-
         for (; result_num < k; result_num++) {
             local_p_id[result_num] = -1;
             local_p_dist[result_num] = 1.0 / 0.0;
         }
     }
 
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
-    return ret_ds;
+    return GenResultDataset(p_id, p_dist);
 }
 
 int64_t
@@ -163,12 +175,12 @@ IndexAnnoy::Dim() {
     return index_->get_dim();
 }
 
-void
-IndexAnnoy::UpdateIndexSize() {
+int64_t
+IndexAnnoy::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = index_->cal_size();
+    return index_->cal_size();
 }
 
 }  // namespace knowhere

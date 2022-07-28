@@ -23,9 +23,10 @@ class KnowhereConfig {
      */
     enum SimdType {
         AUTO = 0,  // enable all and depend on the system
-        SSE4_2,    // only enable SSE4_2
-        AVX2,      // only enable AVX2
         AVX512,    // only enable AVX512
+        AVX2,      // only enable AVX2
+        SSE4_2,    // only enable SSE4_2
+        GENERIC,   // use arithmetic instead of SIMD
     };
 
     static std::string
@@ -37,6 +38,9 @@ class KnowhereConfig {
     static void
     SetIndexFileSliceSize(const int64_t size);
 
+    static int64_t
+    GetIndexFileSliceSize();
+
     /**
      * Set openblas threshold
      *   if nq < use_blas_threshold, calculated by omp
@@ -44,6 +48,9 @@ class KnowhereConfig {
      */
     static void
     SetBlasThreshold(const int64_t use_blas_threshold);
+
+    static int64_t
+    GetBlasThreshold();
 
     /**
      * set Clustering early stop [0, 100]
@@ -54,11 +61,14 @@ class KnowhereConfig {
     static void
     SetEarlyStopThreshold(const double early_stop_threshold);
 
+    static double
+    GetEarlyStopThreshold();
+
     /**
      * set Clustering type
      */
     enum ClusteringType {
-        K_MEANS,            // k-means (default)
+        K_MEANS = 0,        // k-means (default)
         K_MEANS_PLUS_PLUS,  // k-means++
     };
 
@@ -78,8 +88,6 @@ class KnowhereConfig {
     static void
     SetLogHandler();
 
-#ifdef KNOWHERE_GPU_VERSION
-    // todo: move to ohter file?
     /**
      * init GPU Resource
      */
@@ -91,7 +99,6 @@ class KnowhereConfig {
      */
     static void
     FreeGPUResource();
-#endif
 };
 
 }  // namespace knowhere

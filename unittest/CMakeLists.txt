@@ -10,6 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 include_directories(${KNOWHERE_SOURCE_DIR}/thirdparty)
+include_directories(${KNOWHERE_SOURCE_DIR}/thirdparty/faiss)
 include_directories(${KNOWHERE_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 include_directories(${KNOWHERE_SOURCE_DIR}/thirdparty/NGT/lib)
 include_directories(${KNOWHERE_SOURCE_DIR}/knowhere)
@@ -29,7 +30,7 @@ if ( LINUX AND ENABLE_PROFILING )
             )
 endif ()
 
-if ( LINUX AND KNOWHERE_GPU_VERSION )
+if ( ( LINUX OR MSYS ) AND KNOWHERE_GPU_VERSION )
     include_directories( ${CUDA_INCLUDE_DIRS} )
     link_directories( "${CUDA_TOOLKIT_ROOT_DIR}/lib64" )
     set( CUDA_LIB
@@ -52,18 +53,18 @@ set(ALL_INDEXING_SRCS
         test_annoy.cpp
         test_binaryidmap.cpp
         test_binaryivf.cpp
+        test_bruteforce.cpp
         test_customized_index.cpp
         test_hnsw.cpp
         test_idmap.cpp
         test_ivf.cpp
-        test_ivf_cpu_nm.cpp
+        test_ivf_nm.cpp
         test_ivf_hnsw.cpp
-        test_rhnsw_flat.cpp
-        test_rhnsw_pq.cpp
-        test_rhnsw_sq8.cpp
+        test_rhnsw.cpp
+        test_vecindex.cpp
         )
 
-if ( LINUX )
+if ( LINUX OR MSYS )
     set(ALL_INDEXING_SRCS
             ${ALL_INDEXING_SRCS}
             test_instructionset.cpp
@@ -73,7 +74,6 @@ endif()
 if ( KNOWHERE_GPU_VERSION )
     set(ALL_INDEXING_SRCS
             ${ALL_INDEXING_SRCS}
-            test_ivf_gpu_nm.cpp
             test_gpuresource.cpp
             )
 endif ()

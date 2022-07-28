@@ -2,15 +2,15 @@ filters:
   ".*":
     reviewers:
       - cydrain
-      - jaime0815
-      - soothing-rain
+      - landyliu
       - xiaofan-luan
+      - liliu-z
 
     approvers:
       - cydrain
-      - jaime0815
-      - soothing-rain
+      - landyliu
       - xiaofan-luan
+      - liliu-z
 
   "tests":
     reviewers:

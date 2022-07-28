@@ -90,7 +90,6 @@ set(FAISS_SRC
   utils/Heap.cpp
   utils/WorkerThread.cpp
   utils/distances.cpp
-  utils/distances_range.cpp
   utils/distances_simd.cpp
   utils/extra_distances.cpp
   utils/hamming.cpp
@@ -189,7 +188,6 @@ set(FAISS_HEADERS
   utils/Heap.h
   utils/WorkerThread.h
   utils/distances.h
-  utils/distances_range.h
   utils/extra_distances-inl.h
   utils/extra_distances.h
   utils/hamming-inl.h
@@ -208,10 +206,11 @@ set(FAISS_HEADERS
   utils/utils.h
 )
 
-if(NOT WIN32)
+# OK for MSYS
+# if(NOT WIN32)
   list(APPEND FAISS_SRC invlists/OnDiskInvertedLists.cpp)
   list(APPEND FAISS_HEADERS invlists/OnDiskInvertedLists.h)
-endif()
+# endif()
 
 # Export FAISS_HEADERS variable to parent scope.
 set(FAISS_HEADERS ${FAISS_HEADERS} PARENT_SCOPE)

@@ -22,8 +22,13 @@ add_definitions( -DAUTO_INITIALIZE_EASYLOGGINGPP )
 if ( APPLE )
     set ( CMAKE_CROSSCOMPILING TRUE )
     set ( RUN_HAVE_GNU_POSIX_REGEX 0 )
-    set ( CMAKE_C_COMPILER "/usr/local/opt/llvm/bin/clang" )
-    set ( CMAKE_CXX_COMPILER "/usr/local/opt/llvm/bin/clang++" )
+    if ( DEFINED ENV{HOMEBREW_PREFIX} )
+        set( APPLE_LLVM_PREFIX $ENV{HOMEBREW_PREFIX} )
+    else()
+        set( APPLE_LLVM_PREFIX "/usr/local" )
+    endif()
+    set ( CMAKE_C_COMPILER "${APPLE_LLVM_PREFIX}/opt/llvm/bin/clang" )
+    set ( CMAKE_CXX_COMPILER "${APPLE_LLVM_PREFIX}/opt/llvm/bin/clang++" )
 endif ()
 
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
@@ -36,10 +41,6 @@ message( STATUS "Build time = ${BUILD_TIME}" )
 get_build_type( TARGET  BUILD_TYPE
                         DEFAULT "Release" )
 message( STATUS "Build type = ${BUILD_TYPE}" )
-
-get_knowhere_version( TARGET KNOWHERE_VERSION
-                             DEFAULT "1.0.1" )
-message( STATUS "Build version = ${KNOWHERE_VERSION}" )
 
 get_last_commit_id( LAST_COMMIT_ID )
 message( STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}" )
@@ -74,10 +75,12 @@ include( CheckCXXCompilerFlag )
 if ( ${CMAKE_SYSTEM_NAME} MATCHES "Darwin" )
     message(STATUS "MacOS")
     set ( MACOS TRUE )
-    set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -L/usr/local/opt/libomp/lib" )
+    set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -L${APPLE_LLVM_PREFIX}/opt/libomp/lib" )
 elseif ( "${CMAKE_SYSTEM}" MATCHES "Linux" )
     message( STATUS "Linux")
     set ( LINUX TRUE )
+elseif ( MSYS )
+    message( STATUS "==============MSYS Environment===============" )
 else ()
     message( FATAL_ERROR "Unsupported platform!" )
 endif ()
@@ -131,6 +134,8 @@ append_flags( CMAKE_CXX_FLAGS
 # option "-rdynamic" is to print out detailed backtrace info for debug-ease
 if ( LINUX )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-Werror" "-rdynamic" )
+elseif ( MSYS )
+    append_flags( CMAKE_CXX_FLAGS FLAGS "-Werror" )
 endif ()
 
 #*********************** Coding style check tools **********************
@@ -231,18 +236,19 @@ config_summary()
 
 
 #***************************** Source files ****************************
-add_subdirectory( knowhere/utils )
-add_subdirectory( thirdparty )
-add_subdirectory( knowhere )
-
-if ( KNOWHERE_BUILD_TESTS )
-    if ( BUILD_COVERAGE STREQUAL "ON" )
+if ( BUILD_COVERAGE STREQUAL "ON" )
         append_flags( CMAKE_CXX_FLAGS
                       FLAGS
                            "-fprofile-arcs"
                            "-ftest-coverage"
                            )
-    endif ()
+endif ()
+
+add_subdirectory( knowhere/utils )
+add_subdirectory( thirdparty )
+add_subdirectory( knowhere )
+
+if ( KNOWHERE_BUILD_TESTS )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
 
     add_subdirectory( unittest )

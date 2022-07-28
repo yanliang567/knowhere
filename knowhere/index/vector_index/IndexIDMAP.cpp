@@ -52,11 +52,9 @@ IDMAP::Load(const BinarySet& binary_set) {
 
 void
 IDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    // users will assign the metric type when querying
-    // so we let L2 be the default type
-    constexpr faiss::MetricType metric_type = faiss::METRIC_L2;
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    auto dim = config[meta::DIM].get<int64_t>();
+    faiss::MetricType metric_type = GetFaissMetricType(config);
     auto index = std::make_shared<faiss::IndexFlat>(dim, metric_type);
     index_ = index;
 }
@@ -72,62 +70,113 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
+IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    GET_DATA_WITH_IDS(dataset_ptr)
+
+    float* p_x = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_x != nullptr) {
+            free(p_x);
+        }
+    };
+
+    try {
+        p_x = (float*)malloc(sizeof(float) * dim * rows);
+        auto idmap_index = dynamic_cast<faiss::IndexFlat*>(index_.get());
+        for (int64_t i = 0; i < rows; i++) {
+            int64_t id = p_ids[i];
+            KNOWHERE_THROW_IF_NOT_FMT(id >= 0 && id < idmap_index->ntotal, "invalid id %ld", id);
+            idmap_index->reconstruct(id, p_x + i * dim);
+        }
+        return GenResultDataset(p_x);
+    } catch (faiss::FaissException& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+
+DatasetPtr
 IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     GET_TENSOR_DATA(dataset_ptr)
 
-    auto k = config[meta::TOPK].get<int64_t>();
-    auto elems = rows * k;
-    size_t p_id_size = sizeof(int64_t) * elems;
-    size_t p_dist_size = sizeof(float) * elems;
-    auto p_id = static_cast<int64_t*>(malloc(p_id_size));
-    auto p_dist = static_cast<float*>(malloc(p_dist_size));
+    int64_t* p_id = nullptr;
+    float* p_dist = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_id != nullptr) {
+            free(p_id);
+        }
+        if (p_dist != nullptr) {
+            free(p_dist);
+        }
+    };
 
-    QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
-    MapOffsetToUid(p_id, static_cast<size_t>(elems));
+    try {
+        auto k = GetMetaTopk(config);
+        auto elems = rows * k;
+        size_t p_id_size = sizeof(int64_t) * elems;
+        size_t p_dist_size = sizeof(float) * elems;
+        p_id = static_cast<int64_t*>(malloc(p_id_size));
+        p_dist = static_cast<float*>(malloc(p_dist_size));
 
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
-    return ret_ds;
+        QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
+
+        return GenResultDataset(p_id, p_dist);
+    } catch (faiss::FaissException& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
-DynamicResultSegment
-IDMAP::QueryByDistance(const DatasetPtr& dataset,
-                       const Config& config,
-                       const faiss::BitsetView bitset) {
+DatasetPtr
+IDMAP::QueryByRange(const DatasetPtr& dataset,
+                    const Config& config,
+                    const faiss::BitsetView bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     GET_TENSOR_DATA(dataset)
-    if (rows != 1) {
-        KNOWHERE_THROW_MSG("QueryByDistance only accept nq = 1!");
-    }
 
-    auto default_type = index_->metric_type;
-    if (config.contains(Metric::TYPE)) {
-        index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    auto radius = GetMetaRadius(config);
+
+    int64_t* p_id = nullptr;
+    float* p_dist = nullptr;
+    size_t* p_lims = nullptr;
+
+    auto release_when_exception = [&]() {
+        if (p_id != nullptr) {
+            free(p_id);
+        }
+        if (p_dist != nullptr) {
+            free(p_dist);
+        }
+        if (p_lims != nullptr) {
+            free(p_lims);
+        }
+    };
+
+    try {
+        QueryByRangeImpl(rows, reinterpret_cast<const float*>(p_data), radius, p_dist, p_id, p_lims, config, bitset);
+        return GenResultDataset(p_id, p_dist, p_lims);
+    } catch (faiss::FaissException& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
     }
-    std::vector<faiss::RangeSearchPartialResult*> res;
-    DynamicResultSegment result;
-    auto radius = config[IndexParams::range_search_radius].get<float>();
-    auto buffer_size = config.contains(IndexParams::range_search_buffer_size)
-                           ? config[IndexParams::range_search_buffer_size].get<size_t>()
-                           : 16384;
-    auto real_idx = dynamic_cast<faiss::IndexFlat*>(index_.get());
-    if (real_idx == nullptr) {
-        KNOWHERE_THROW_MSG("Cannot dynamic_cast the index to faiss::IndexFlat type!");
-    }
-    if (index_->metric_type == faiss::MetricType::METRIC_L2) {
-        radius *= radius;
-    }
-    real_idx->range_search(rows, reinterpret_cast<const float*>(p_data), radius, res, buffer_size, bitset);
-    ExchangeDataset(result, res);
-    MapUids(result);
-    index_->metric_type = default_type;
-    return result;
 }
 
 int64_t
@@ -182,9 +231,36 @@ IDMAP::QueryImpl(int64_t n,
                  int64_t* labels,
                  const Config& config,
                  const faiss::BitsetView bitset) {
-    // assign the metric type
-    index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, data, k, distances, labels, bitset);
+}
+
+void
+IDMAP::QueryByRangeImpl(int64_t n,
+                        const float* data,
+                        float radius,
+                        float*& distances,
+                        int64_t*& labels,
+                        size_t*& lims,
+                        const Config& config,
+                        const faiss::BitsetView bitset) {
+    auto idmap_index = dynamic_cast<faiss::IndexFlat*>(index_.get());
+
+    if (index_->metric_type == faiss::MetricType::METRIC_L2) {
+        radius *= radius;
+    }
+
+    faiss::RangeSearchResult res(n);
+    idmap_index->range_search(n, reinterpret_cast<const float*>(data), radius, &res, bitset);
+
+    distances = res.distances;
+    labels = res.labels;
+    lims = res.lims;
+
+    LOG_KNOWHERE_DEBUG_ << "Range search radius: " << radius << ", result num: " << lims[n];
+
+    res.distances = nullptr;
+    res.labels = nullptr;
+    res.lims = nullptr;
 }
 
 }  // namespace knowhere

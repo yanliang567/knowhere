@@ -80,11 +80,10 @@ void
 IVFHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    auto coarse_quantizer = new faiss::IndexRHNSWFlat(dim, config[IndexParams::M], metric_type);
-    coarse_quantizer->hnsw.efConstruction = config[IndexParams::efConstruction];
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
-                                                       metric_type);
+    faiss::MetricType metric_type = GetFaissMetricType(config);
+    auto coarse_quantizer = new faiss::IndexRHNSWFlat(dim, GetIndexParamHNSWM(config), metric_type);
+    coarse_quantizer->hnsw.efConstruction = GetIndexParamEfConstruction(config);
+    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, GetIndexParamNlist(config), metric_type);
     index->own_fields = true;
     index->train(rows, reinterpret_cast<const float*>(p_data));
     index_ = index;
@@ -95,8 +94,8 @@ IVFHNSW::CopyCpuToGpu(const int64_t device_id, const Config& config) {
     KNOWHERE_THROW_MSG("IVFHNSW::CopyCpuToGpu not supported.");
 }
 
-void
-IVFHNSW::UpdateIndexSize() {
+int64_t
+IVFHNSW::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -105,7 +104,7 @@ IVFHNSW::UpdateIndexSize() {
     auto code_size = ivf_index->code_size;
     auto hnsw_quantizer = dynamic_cast<faiss::IndexRHNSWFlat*>(ivf_index->quantizer);
     // ivf codes, ivf ids and hnsw_flat quantizer
-    index_size_ = nb * code_size + nb * sizeof(int64_t) + hnsw_quantizer->cal_size();
+    return (nb * code_size + nb * sizeof(int64_t) + hnsw_quantizer->cal_size());
 }
 
 void
@@ -126,7 +125,7 @@ IVFHNSW::QueryImpl(int64_t n,
     }
     // Update HNSW quantizer search param
     auto hnsw_quantizer = dynamic_cast<faiss::IndexRHNSWFlat*>(ivf_index->quantizer);
-    hnsw_quantizer->hnsw.efSearch = config[IndexParams::ef].get<int64_t>();
+    hnsw_quantizer->hnsw.efSearch = GetIndexParamEf(config);
     ivf_index->search(n, data, k, distances, labels, bitset);
 }
 

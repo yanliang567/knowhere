@@ -28,14 +28,15 @@ namespace knowhere {
 void
 GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
-    gpu_id_ = config[meta::DEVICEID];
+    gpu_id_ = GetMetaDeviceID(config);
+
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
         faiss::gpu::GpuIndexIVFScalarQuantizerConfig idx_config;
         idx_config.device = static_cast<int32_t>(gpu_id_);
-        int32_t nlist = config[IndexParams::nlist];
-        faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        int32_t nlist = GetIndexParamNlist(config);
+        faiss::MetricType metric_type = GetFaissMetricType(config);
         index_ = std::make_shared<faiss::gpu::GpuIndexIVFScalarQuantizer>(
             gpu_res->faiss_res.get(), dim, nlist, faiss::QuantizerType::QT_8bit, metric_type, true, idx_config);
         index_->train(rows, (float*)p_data);

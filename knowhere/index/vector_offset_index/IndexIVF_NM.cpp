@@ -60,11 +60,11 @@ IVF_NM::Load(const BinarySet& binary_set) {
 
     // Construct arranged data from original data
     auto binary = binary_set.GetByName(RAW_DATA);
-    auto original_data = reinterpret_cast<const float*>(binary->data.get());
     auto ivf_index = static_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
     auto d = ivf_index->d;
-    prefix_sum.resize(invlists->nlist);
+    size_t nb = binary->size / invlists->code_size;
+    ivf_index->prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
 
 #if 0
@@ -75,17 +75,16 @@ IVF_NM::Load(const BinarySet& binary_set) {
 
 #ifndef KNOWHERE_GPU_VERSION
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
-    size_t nb = binary->size / invlists->code_size;
-    auto arranged_data = new float[d * nb];
+    ivf_index->arranged_codes.resize(d * nb * sizeof(float));
     for (size_t i = 0; i < invlists->nlist; i++) {
         auto list_size = ails->ids[i].size();
         for (size_t j = 0; j < list_size; j++) {
-            memcpy(arranged_data + d * (curr_index + j), original_data + d * ails->ids[i][j], d * sizeof(float));
+            memcpy(ivf_index->arranged_codes.data() + d * (curr_index + j) * sizeof(float),
+                   binary->data.get() + d * ails->ids[i][j] * sizeof(float), d * sizeof(float));
         }
-        prefix_sum[i] = curr_index;
+        ivf_index->prefix_sum[i] = curr_index;
         curr_index += list_size;
     }
-    data_ = std::shared_ptr<uint8_t[]>(reinterpret_cast<uint8_t*>(arranged_data));
 #else
     auto rol = dynamic_cast<faiss::ReadOnlyArrayInvertedLists*>(invlists);
     auto arranged_data = reinterpret_cast<float*>(rol->pin_readonly_codes->data);
@@ -94,28 +93,28 @@ IVF_NM::Load(const BinarySet& binary_set) {
     for (size_t i = 0; i < invlists->nlist; i++) {
         auto list_size = lengths[i];
         for (size_t j = 0; j < list_size; j++) {
-            memcpy(arranged_data + d * (curr_index + j), original_data + d * rol_ids[curr_index + j],
+            memcpy(arranged_data + d * (curr_index + j),
+                   binary->data.get() + d * rol_ids[curr_index + j] * sizeof(float),
                    d * sizeof(float));
         }
-        prefix_sum[i] = curr_index;
+        ivf_index->prefix_sum[i] = curr_index;
         curr_index += list_size;
     }
 
     /* hold codes shared pointer */
-    ro_codes = rol->pin_readonly_codes;
-    data_ = nullptr;
+    ro_codes_ = rol->pin_readonly_codes;
 #endif
-    //    LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::Load finished, show statistics:";
-    //    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-    //    LOG_KNOWHERE_DEBUG_ << ivf_stats->ToString();
+    // LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::Load finished, show statistics:";
+    // auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+    // LOG_KNOWHERE_DEBUG_ << ivf_stats->ToString();
 }
 
 void
 IVF_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
-    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    int64_t nlist = GetIndexParamNlist(config);
+    faiss::MetricType metric_type = GetFaissMetricType(config);
     auto coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
     auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, nlist, metric_type);
     index->own_fields = true;
@@ -131,6 +130,40 @@ IVF_NM::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 
     GET_TENSOR_DATA(dataset_ptr)
     index_->add_without_codes(rows, reinterpret_cast<const float*>(p_data));
+}
+
+DatasetPtr
+IVF_NM::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    GET_DATA_WITH_IDS(dataset_ptr)
+
+    float* p_x = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_x != nullptr) {
+            free(p_x);
+        }
+    };
+
+    try {
+        p_x = (float*)malloc(sizeof(float) * dim * rows);
+        auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+        ivf_index->make_direct_map(true);
+        for (int64_t i = 0; i < rows; i++) {
+            int64_t id = p_ids[i];
+            KNOWHERE_THROW_IF_NOT_FMT(id >= 0 && id < ivf_index->ntotal, "invalid id %ld", id);
+            ivf_index->reconstruct_without_codes(id, p_x + i * dim);
+        }
+        return GenResultDataset(p_x);
+    } catch (faiss::FaissException& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        release_when_exception();
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
 DatasetPtr
@@ -153,7 +186,7 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
     };
 
     try {
-        auto k = config[meta::TOPK].get<int64_t>();
+        auto k = GetMetaTopk(config);
         auto elems = rows * k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
@@ -162,12 +195,8 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
         auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
         QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
-        MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
-        auto ret_ds = std::make_shared<Dataset>();
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, p_dist);
-        return ret_ds;
+        return GenResultDataset(p_id, p_dist);
     } catch (faiss::FaissException& e) {
         release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
@@ -177,67 +206,41 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
     }
 }
 
-#if 0
 DatasetPtr
-IVF_NM::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
+IVF_NM::QueryByRange(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
+    GET_TENSOR_DATA(dataset_ptr)
 
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    auto radius = GetMetaRadius(config);
+
+    int64_t* p_id = nullptr;
+    float* p_dist = nullptr;
+    size_t* p_lims = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_id != nullptr) {
+            free(p_id);
+        }
+        if (p_dist != nullptr) {
+            free(p_dist);
+        }
+        if (p_lims != nullptr) {
+            free(p_lims);
+        }
+    };
 
     try {
-        int64_t k = config[meta::TOPK].get<int64_t>();
-        auto elems = rows * k;
-
-        size_t p_id_size = sizeof(int64_t) * elems;
-        size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = (int64_t*)malloc(p_id_size);
-        auto p_dist = (float*)malloc(p_dist_size);
-
-        // todo: enable search by id (zhiru)
-        //        auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
-        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->search_by_id(rows, p_data, k, p_dist, p_id, bitset_);
-
-        auto ret_ds = std::make_shared<Dataset>();
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, p_dist);
-        return ret_ds;
+        QueryByRangeImpl(rows, reinterpret_cast<const float*>(p_data), radius, p_dist, p_id, p_lims, config, bitset);
+        return GenResultDataset(p_id, p_dist, p_lims);
     } catch (faiss::FaissException& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     } catch (std::exception& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     }
 }
-
-DatasetPtr
-IVF_NM::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
-
-    try {
-        size_t p_x_size = sizeof(float) * elems;
-        auto p_x = (float*)malloc(p_x_size);
-
-        auto index_ivf = std::static_pointer_cast<faiss::IndexIVF>(index_);
-        index_ivf->get_vector_by_id(1, p_data, p_x, bitset_);
-
-        auto ret_ds = std::make_shared<Dataset>();
-        ret_ds->Set(meta::TENSOR, p_x);
-        return ret_ds;
-    } catch (faiss::FaissException& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-#endif
 
 void
 IVF_NM::Seal() {
@@ -253,7 +256,7 @@ IVF_NM::CopyCpuToGpu(const int64_t device_id, const Config& config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         auto gpu_index = faiss::gpu::index_cpu_to_gpu_without_codes(res->faiss_res.get(), device_id, index_.get(),
-                                                                    static_cast<const uint8_t*>(ro_codes->data));
+                                                                    static_cast<const uint8_t*>(ro_codes_->data));
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
@@ -272,7 +275,7 @@ IVF_NM::GenGraph(const float* data, const int64_t k, GraphType& graph, const Con
     int64_t K = k + 1;
     auto ntotal = Count();
 
-    size_t dim = config[meta::DIM];
+    auto dim = GetMetaDim(config);
     auto batch_size = 1000;
     auto tail_batch_size = ntotal % batch_size;
     auto batch_search_count = ntotal / batch_size;
@@ -304,14 +307,14 @@ IVF_NM::GenGraph(const float* data, const int64_t k, GraphType& graph, const Con
 std::shared_ptr<faiss::IVFSearchParameters>
 IVF_NM::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFSearchParameters>();
-    params->nprobe = config[IndexParams::nprobe];
+    params->nprobe = GetIndexParamNprobe(config);
     // params->max_codes = config["max_codes"];
     return params;
 }
 
 void
 IVF_NM::QueryImpl(int64_t n,
-                  const float* query,
+                  const float* xq,
                   int64_t k,
                   float* distances,
                   int64_t* labels,
@@ -319,23 +322,19 @@ IVF_NM::QueryImpl(int64_t n,
                   const faiss::BitsetView bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
-    ivf_index->nprobe = params->nprobe;
+    ivf_index->nprobe = std::min(params->nprobe, ivf_index->invlists->nlist);
     stdclock::time_point before = stdclock::now();
     if (params->nprobe > 1 && n <= 4) {
         ivf_index->parallel_mode = 1;
     } else {
         ivf_index->parallel_mode = 0;
     }
-    bool is_sq8 = (index_type_ == IndexEnum::INDEX_FAISS_IVFSQ8) ? true : false;
 
-#ifndef KNOWHERE_GPU_VERSION
-    auto data = static_cast<const uint8_t*>(data_.get());
-#else
-    auto data = static_cast<const uint8_t*>(ro_codes->data);
+#ifdef KNOWHERE_GPU_VERSION
+    auto arranged_data = static_cast<const uint8_t*>(ro_codes_->data);
 #endif
     auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-    ivf_index->search_without_codes(n, reinterpret_cast<const float*>(query), data, prefix_sum, is_sq8, k, distances,
-                                    labels, bitset);
+    ivf_index->search_without_codes(n, xq, k, distances, labels, bitset);
 #if 0
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
@@ -358,8 +357,45 @@ IVF_NM::QueryImpl(int64_t n,
         }
     }
 #endif
-    //     LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
-    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    // LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
+    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+}
+
+void
+IVF_NM::QueryByRangeImpl(int64_t n,
+                         const float* xq,
+                         float radius,
+                         float*& distances,
+                         int64_t*& labels,
+                         size_t*& lims,
+                         const Config& config,
+                         const faiss::BitsetView bitset) {
+    auto params = GenParams(config);
+    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    ivf_index->nprobe = std::min(params->nprobe, ivf_index->invlists->nlist);
+    stdclock::time_point before = stdclock::now();
+    if (params->nprobe > 1 && n <= 4) {
+        ivf_index->parallel_mode = 1;
+    } else {
+        ivf_index->parallel_mode = 0;
+    }
+
+    if (index_->metric_type == faiss::MetricType::METRIC_L2) {
+        radius *= radius;
+    }
+
+    faiss::RangeSearchResult res(n);
+    ivf_index->range_search_without_codes(n, xq, radius, &res, bitset);
+
+    distances = res.distances;
+    labels = res.labels;
+    lims = res.lims;
+
+    LOG_KNOWHERE_DEBUG_ << "Range search radius: " << radius << ", result num: " << lims[n];
+
+    res.distances = nullptr;
+    res.labels = nullptr;
+    res.lims = nullptr;
 }
 
 void
@@ -389,8 +425,8 @@ IVF_NM::Dim() {
     return index_->d;
 }
 
-void
-IVF_NM::UpdateIndexSize() {
+int64_t
+IVF_NM::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -398,8 +434,8 @@ IVF_NM::UpdateIndexSize() {
     auto nb = ivf_index->invlists->compute_ntotal();
     auto nlist = ivf_index->nlist;
     auto code_size = ivf_index->code_size;
-    // ivf codes, ivf ids and quantizer
-    index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
+    // ivf ids and quantizer
+    return (nb * sizeof(int64_t) + nlist * code_size);
 }
 
 #if 0

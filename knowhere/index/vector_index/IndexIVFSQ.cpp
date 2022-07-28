@@ -35,10 +35,10 @@ void
 IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    faiss::MetricType metric_type = GetFaissMetricType(config);
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
     auto index = std::make_shared<faiss::IndexIVFScalarQuantizer>(
-        coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type);
+        coarse_quantizer, dim, GetIndexParamNlist(config), faiss::QuantizerType::QT_8bit, metric_type);
     index->own_fields = true;
     index->train(rows, reinterpret_cast<const float*>(p_data));
     index_ = index;
@@ -63,8 +63,8 @@ IVFSQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #endif
 }
 
-void
-IVFSQ::UpdateIndexSize() {
+int64_t
+IVFSQ::Size() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -74,7 +74,7 @@ IVFSQ::UpdateIndexSize() {
     auto nlist = ivfsq_index->nlist;
     auto d = ivfsq_index->d;
     // ivf codes, ivf ids, sq trained vectors and quantizer
-    index_size_ = nb * code_size + nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float);
+    return (nb * code_size + nb * sizeof(int64_t) + 2 * code_size + nlist * code_size);
 }
 
 }  // namespace knowhere

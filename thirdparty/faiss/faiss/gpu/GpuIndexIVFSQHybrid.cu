@@ -319,7 +319,7 @@ void GpuIndexIVFSQHybrid::searchImpl_(
     Tensor<Index::idx_t, 2, true>
             outLabels(const_cast<Index::idx_t*>(labels), {n, k});
 
-    if (!bitset) {
+    if (bitset.empty()) {
         auto bitsetDevice = toDeviceTemporary<uint8_t, 1>(
                 resources_.get(),
                 config_.device,
@@ -339,7 +339,7 @@ void GpuIndexIVFSQHybrid::searchImpl_(
                 config_.device,
                 const_cast<uint8_t*>(bitset.data()),
                 stream,
-                {(int)bitset.u8size()});
+                {(int)bitset.byte_size()});
         index_->query(
                 queries,
                 bitsetDevice,

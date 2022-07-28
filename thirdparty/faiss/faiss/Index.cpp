@@ -67,6 +67,10 @@ void Index::reconstruct(idx_t, float*) const {
     FAISS_THROW_MSG("reconstruct not implemented for this type of index");
 }
 
+void Index::reconstruct_without_codes(idx_t, float*) const {
+    FAISS_THROW_MSG("reconstruct_without_codes not implemented for this type of index");
+}
+
 void Index::reconstruct_n(idx_t i0, idx_t ni, float* recons) const {
     for (idx_t i = 0; i < ni; i++) {
         reconstruct(i0 + i, recons + i * d);

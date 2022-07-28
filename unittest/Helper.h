@@ -29,7 +29,7 @@
 #include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
-constexpr int DEVICEID = 0;
+constexpr int DEVICE_ID = 0;
 constexpr int64_t DIM = 128;
 constexpr int64_t NB = 10000;
 constexpr int64_t NQ = 10;
@@ -37,52 +37,6 @@ constexpr int64_t K = 10;
 constexpr int64_t PINMEM = 1024 * 1024 * 200;
 constexpr int64_t TEMPMEM = 1024 * 1024 * 300;
 constexpr int64_t RESNUM = 2;
-
-inline knowhere::IVFPtr
-IndexFactory(const knowhere::IndexType& type, const knowhere::IndexMode mode) {
-    if (mode == knowhere::IndexMode::MODE_CPU) {
-        if (type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-            return std::make_shared<knowhere::IVF>();
-        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-            return std::make_shared<knowhere::IVFPQ>();
-        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
-            return std::make_shared<knowhere::IVFSQ>();
-        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFHNSW) {
-            return std::make_shared<knowhere::IVFHNSW>();
-        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
-            std::cout << "IVFSQ8H does not support MODE_CPU" << std::endl;
-        } else {
-            std::cout << "Invalid IndexType " << type << std::endl;
-        }
-#ifdef KNOWHERE_GPU_VERSION
-    } else {
-        if (type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-            return std::make_shared<knowhere::GPUIVF>(DEVICEID);
-        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-            return std::make_shared<knowhere::GPUIVFPQ>(DEVICEID);
-        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
-            return std::make_shared<knowhere::GPUIVFSQ>(DEVICEID);
-        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
-            return std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
-        } else {
-            std::cout << "Invalid IndexType " << type << std::endl;
-        }
-#endif
-    }
-    return nullptr;
-}
-
-inline knowhere::IVFNMPtr
-IndexFactoryNM(const knowhere::IndexType& type, const knowhere::IndexMode mode) {
-    if (mode == knowhere::IndexMode::MODE_CPU) {
-        if (type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-            return std::make_shared<knowhere::IVF_NM>();
-        } else {
-            std::cout << "Invalid IndexType " << type << std::endl;
-        }
-    }
-    return nullptr;
-}
 
 class ParamGenerator {
  public:
@@ -94,52 +48,114 @@ class ParamGenerator {
 
     knowhere::Config
     Gen(const knowhere::IndexType& type) {
-        if (type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+        if (type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
             return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::HAMMING},
                 {knowhere::meta::DIM, DIM},
                 {knowhere::meta::TOPK, K},
-                {knowhere::IndexParams::nlist, 100},
-                {knowhere::IndexParams::nprobe, 4},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
-                {knowhere::meta::DEVICEID, DEVICEID},
+            };
+        } else if (type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+            return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::HAMMING},
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::indexparam::NLIST, 16},
+                {knowhere::indexparam::NPROBE, 8},
+        };
+        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IDMAP) {
+            return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::meta::DEVICE_ID, DEVICE_ID},
+            };
+        } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+            return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::meta::DEVICE_ID, DEVICE_ID},
+                {knowhere::indexparam::NLIST, 16},
+                {knowhere::indexparam::NPROBE, 8},
             };
         } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
             return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                 {knowhere::meta::DIM, DIM},
                 {knowhere::meta::TOPK, K},
-                {knowhere::IndexParams::nlist, 100},
-                {knowhere::IndexParams::nprobe, 4},
-                {knowhere::IndexParams::m, 4},
-                {knowhere::IndexParams::nbits, 8},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
-                {knowhere::meta::DEVICEID, DEVICEID},
+                {knowhere::meta::DEVICE_ID, DEVICE_ID},
+                {knowhere::indexparam::NLIST, 16},
+                {knowhere::indexparam::NPROBE, 8},
+                {knowhere::indexparam::M, 4},
+                {knowhere::indexparam::NBITS, 8},
             };
         } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
                    type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
             return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                 {knowhere::meta::DIM, DIM},
                 {knowhere::meta::TOPK, K},
-                {knowhere::IndexParams::nlist, 100},
-                {knowhere::IndexParams::nprobe, 4},
-                {knowhere::IndexParams::nbits, 8},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
-                {knowhere::meta::DEVICEID, DEVICEID},
+                {knowhere::meta::DEVICE_ID, DEVICE_ID},
+                {knowhere::indexparam::NLIST, 16},
+                {knowhere::indexparam::NPROBE, 8},
+                {knowhere::indexparam::NBITS, 8},
             };
         } else if (type == knowhere::IndexEnum::INDEX_FAISS_IVFHNSW) {
             return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                 {knowhere::meta::DIM, DIM},
                 {knowhere::meta::TOPK, K},
-                {knowhere::IndexParams::nlist, 100},
-                {knowhere::IndexParams::nprobe, 4},
-                {knowhere::IndexParams::M, 16},
-                {knowhere::IndexParams::efConstruction, 200},
-                {knowhere::IndexParams::ef, 200},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
-                {knowhere::meta::DEVICEID, DEVICEID},
+                {knowhere::meta::DEVICE_ID, DEVICE_ID},
+                {knowhere::indexparam::NLIST, 16},
+                {knowhere::indexparam::NPROBE, 8},
+                {knowhere::indexparam::HNSW_M, 16},
+                {knowhere::indexparam::EFCONSTRUCTION, 200},
+                {knowhere::indexparam::EF, 200},
+            };
+        } else if (type == knowhere::IndexEnum::INDEX_HNSW) {
+            return knowhere::Config {
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::indexparam::HNSW_M, 16},
+                {knowhere::indexparam::EFCONSTRUCTION, 200},
+                {knowhere::indexparam::EF, 200},
+            };
+        } else if (type == knowhere::IndexEnum::INDEX_ANNOY) {
+            return knowhere::Config {
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::indexparam::N_TREES, 4},
+                {knowhere::indexparam::SEARCH_K, 100},
+            };
+        } else if (type == knowhere::IndexEnum::INDEX_RHNSWFlat) {
+            return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::indexparam::HNSW_M, 16},
+                {knowhere::indexparam::EFCONSTRUCTION, 200},
+                {knowhere::indexparam::EF, 200},
+            };
+        } else if (type == knowhere::IndexEnum::INDEX_RHNSWPQ) {
+            return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::indexparam::HNSW_M, 16},
+                {knowhere::indexparam::EFCONSTRUCTION, 200},
+                {knowhere::indexparam::EF, 200},
+                {knowhere::indexparam::PQ_M, 8},
+            };
+        } else if (type == knowhere::IndexEnum::INDEX_RHNSWSQ) {
+            return knowhere::Config{
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                {knowhere::meta::DIM, DIM},
+                {knowhere::meta::TOPK, K},
+                {knowhere::indexparam::HNSW_M, 16},
+                {knowhere::indexparam::EFCONSTRUCTION, 200},
+                {knowhere::indexparam::EF, 200},
             };
         } else {
             std::cout << "Invalid index type " << type << std::endl;
@@ -155,7 +171,7 @@ class TestGpuIndexBase : public ::testing::Test {
     void
     SetUp() override {
 #ifdef KNOWHERE_GPU_VERSION
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, PINMEM, TEMPMEM, RESNUM);
 #endif
     }
 

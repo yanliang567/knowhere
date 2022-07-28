@@ -13,10 +13,10 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
+#include "knowhere/index/VecIndex.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
-#include "knowhere/index/vector_index/VecIndex.h"
-#include "knowhere/index/vector_index/helpers/DynamicResultSet.h"
 
 namespace knowhere {
 
@@ -43,10 +43,13 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
+    GetVectorById(const DatasetPtr&, const Config&) override;
+
+    DatasetPtr
     Query(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
 
-    DynamicResultSegment
-    QueryByDistance(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView bitset);
+    DatasetPtr
+    QueryByRange(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
 
     int64_t
     Count() override;
@@ -55,7 +58,7 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     Dim() override;
 
     int64_t
-    IndexSize() override {
+    Size() override {
         return Count() * Dim() * sizeof(FloatType);
     }
 
@@ -68,6 +71,10 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
  protected:
     virtual void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::BitsetView);
+
+    virtual void
+    QueryByRangeImpl(int64_t, const float*, float, float*&, int64_t*&, size_t*&, const Config&,
+                     const faiss::BitsetView);
 };
 
 using IDMAPPtr = std::shared_ptr<IDMAP>;

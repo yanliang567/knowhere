@@ -33,17 +33,17 @@ class SPTAGTest : public DataGen, public TestWithParam<std::string> {
         index_ = std::make_shared<knowhere::CPUSPTAGRNG>(IndexType);
         if (IndexType == "KDT") {
             conf = knowhere::Config{
+                {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                 {knowhere::meta::DIM, dim},
                 {knowhere::meta::TOPK, 10},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
             };
         } else {
             conf = knowhere::Config{
+                {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                 {knowhere::meta::DIM, dim},
                 {knowhere::meta::TOPK, 10},
-                {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
             };
         }
 
@@ -66,13 +66,14 @@ TEST_P(SPTAGTest, sptag_basic) {
     ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
 
     index_->BuildAll(base_dataset, conf);
+    ASSERT_GT(index_->Size(), 0);
     // index_->Add(base_dataset, conf);
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
 
     {
-        auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-        auto dist = result->Get<float*>(knowhere::meta::DISTANCE);
+        auto ids = knowhere::GetDatasetIDs(result);
+        auto dist = knowhere::GetDatasetDistance(result);
 
         std::stringstream ss_id;
         std::stringstream ss_dist;
@@ -109,7 +110,7 @@ TEST_P(SPTAGTest, sptag_serialize) {
 
     {
         int fileno = 0;
-        const std::string& base_name = "/tmp/sptag_serialize_test_bin_";
+        const std::string& base_name = temp_path("/tmp/sptag_serialize_test_bin_");
         std::vector<std::string> filename_list;
         std::vector<std::pair<std::string, size_t>> meta_list;
         for (auto& iter : binaryset.binary_map_) {
@@ -157,7 +158,7 @@ TEST_P(SPTAGTest, sptag_slice) {
 
     {
         int fileno = 0;
-        const std::string& base_name = "/tmp/sptag_serialize_test_bin_";
+        const std::string& base_name = temp_path("/tmp/sptag_serialize_test_bin_");
         std::vector<std::string> filename_list;
         std::vector<std::pair<std::string, size_t>> meta_list;
         for (auto& iter : binaryset.binary_map_) {

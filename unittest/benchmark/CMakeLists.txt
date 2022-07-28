@@ -25,30 +25,28 @@ set(depend_libs
         ${LAPACK_LIBRARIES}
         )
 
-set(basic_libs
-        gomp gfortran pthread
+if ( LINUX AND ENABLE_PROFILING )
+    set( depend_libs
+        ${depend_libs}
+        gperftools
         )
+endif ()
 
 set( UTIL_SRCS
         ${KNOWHERE_SOURCE_DIR}/unittest/utils.cpp
         )
 
 #==============================================================================
-set( BENCHMARK_FAISS_SRCS
-        ${UTIL_SRCS}
-        benchmark_faiss_test.cpp
-        )
+macro(benchmark_test target file)
+    set(FILE_SRCS ${UTIL_SRCS} ${file})
+    add_executable(${target} ${FILE_SRCS})
+    target_link_libraries(${target} ${depend_libs} ${unittest_libs})
+    install(TARGETS ${target} DESTINATION unittest)
+endmacro()
 
-add_executable(benchmark_faiss ${BENCHMARK_FAISS_SRCS})
-target_link_libraries(benchmark_faiss ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS benchmark_faiss DESTINATION unittest)
-
-#==============================================================================
-set( BENCHMARK_KNOWHERE_SRCS
-        ${UTIL_SRCS}
-        benchmark_knowhere_test.cpp
-        )
-
-add_executable(benchmark_knowhere ${BENCHMARK_KNOWHERE_SRCS})
-target_link_libraries(benchmark_knowhere ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS benchmark_knowhere DESTINATION unittest)
+benchmark_test(benchmark_faiss                  benchmark_faiss.cpp)
+benchmark_test(benchmark_knowhere_binary        benchmark_knowhere_binary.cpp)
+benchmark_test(benchmark_knowhere_binary_range  benchmark_knowhere_binary_range.cpp)
+benchmark_test(benchmark_knowhere_float         benchmark_knowhere_float.cpp)
+benchmark_test(benchmark_knowhere_float_range   benchmark_knowhere_float_range.cpp)
+benchmark_test(benchmark_knowhere_perf          benchmark_knowhere_perf.cpp)

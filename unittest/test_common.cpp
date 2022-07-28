@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <thread>
 #include <gtest/gtest.h>
 
 #include "knowhere/common/Dataset.h"
@@ -38,22 +39,20 @@ TEST(COMMON_TEST, knowhere_exception) {
 
 TEST(COMMON_TEST, time_recoder) {
     knowhere::TimeRecorder recoder("COMMTEST", 0);
-    sleep(1);
+    std::this_thread::sleep_for(std::chrono::seconds{1});
     double span = recoder.ElapseFromBegin("get time");
     ASSERT_GE(span, 1.0);
 }
 
 TEST(COMMON_TEST, BitsetView) {
-    using faiss::BitsetView;
-    using faiss::ConcurrentBitset;
-    int N = 1000 * 3;
-    auto con_bitset = std::make_shared<ConcurrentBitset>(N);
-    for (int i = 0; i < N; ++i) {
-        if (i % 3 == 0) {
-            con_bitset->set(i);
-        } else {
-            con_bitset->clear(i);
-        }
+    int N = 120;
+    std::shared_ptr<uint8_t[]> data(new uint8_t[N/8]);
+    auto bitset = faiss::BitsetView(data.get(), N);
+
+    std::vector<uint8_t> init_array = {0x0, 0x1, 0x3, 0x7, 0xf, 0xf1, 0xf3, 0xf7, 0xff};
+    for (size_t i = 0; i < init_array.size(); i++) {
+        memset(data.get(), init_array[i], N / 8);
+        ASSERT_EQ(bitset.count(), N / 8 * i);
+        std::cout << bitset.to_string(0, N) << std::endl;
     }
-    ASSERT_EQ(con_bitset->count_1(), N / 3);
 }

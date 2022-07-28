@@ -9,14 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "unittest/utils.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-
 #include <gtest/gtest.h>
 #include <math.h>
 #include <memory>
+#include <random>
 #include <string>
 #include <utility>
+
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/utils/BitsetView.h"
+#include "unittest/utils.h"
 
 void
 DataGen::Init_with_default(const bool is_binary) {
@@ -30,7 +32,7 @@ DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binar
     this->nq = nq;
 
     if (!is_binary) {
-        GenAll(dim, nb, xb, ids, xids, nq, xq);
+        GenAll(dim, nb, xb, ids, nq, xq);
         assert(xb.size() == (size_t)dim * nb);
         assert(xq.size() == (size_t)dim * nq);
 
@@ -38,7 +40,7 @@ DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binar
         query_dataset = knowhere::GenDataset(nq, dim, xq.data());
     } else {
         int64_t dim_x = dim / 8;
-        GenAll(dim_x, nb, xb_bin, ids, xids, nq, xq_bin);
+        GenAll(dim_x, nb, xb_bin, ids, nq, xq_bin);
         assert(xb_bin.size() == (size_t)dim_x * nb);
         assert(xq_bin.size() == (size_t)dim_x * nq);
 
@@ -46,8 +48,14 @@ DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binar
         query_dataset = knowhere::GenDataset(nq, dim, xq_bin.data());
     }
 
-    id_dataset = knowhere::GenDataset(nq, dim, nullptr);
-    xid_dataset = knowhere::GenDataset(nq, dim, nullptr);
+    // used to test GetVectorById [0, nq-1]
+    id_dataset = knowhere::GenDatasetWithIds(nq, dim, ids.data());
+
+    bitset_data.resize(nb/8);
+    for (int64_t i = 0; i < nq; ++i) {
+        set_bit(bitset_data.data(), i);
+    }
+    bitset = std::make_shared<faiss::BitsetView>(bitset_data.data(), nb);
 }
 
 void
@@ -55,14 +63,12 @@ GenAll(const int64_t dim,
        const int64_t nb,
        std::vector<float>& xb,
        std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids,
        const int64_t nq,
        std::vector<float>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
-    xids.resize(1);
-    GenBase(dim, nb, xb.data(), ids.data(), nq, xq.data(), xids.data(), false);
+    GenBase(dim, nb, xb.data(), ids.data(), nq, xq.data(), false);
 }
 
 void
@@ -70,14 +76,12 @@ GenAll(const int64_t dim,
        const int64_t nb,
        std::vector<uint8_t>& xb,
        std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids,
        const int64_t nq,
        std::vector<uint8_t>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
-    xids.resize(1);
-    GenBase(dim, nb, xb.data(), ids.data(), nq, xq.data(), xids.data(), true);
+    GenBase(dim, nb, xb.data(), ids.data(), nq, xq.data(), true);
 }
 
 void
@@ -87,7 +91,6 @@ GenBase(const int64_t dim,
         int64_t* ids,
         const int64_t nq,
         const void* xq,
-        int64_t* xids,
         bool is_binary) {
     if (!is_binary) {
         float* xb_f = (float*)xb;
@@ -116,19 +119,22 @@ GenBase(const int64_t dim,
             xq_u[i] = xb_u[i];
         }
     }
-    xids[0] = 3;  // pseudo random
 }
 
 void
-AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const CheckMode check_mode) {
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+AssertAnns(const knowhere::DatasetPtr& result,
+           const int nq,
+           const int k,
+           const CheckMode check_mode) {
+    auto ids = knowhere::GetDatasetIDs(result);
     for (auto i = 0; i < nq; i++) {
+        auto id = ids[i * k];
         switch (check_mode) {
             case CheckMode::CHECK_EQUAL:
-                ASSERT_EQ(i, *((int64_t*)(ids) + i * k));
+                ASSERT_EQ(i, id);
                 break;
             case CheckMode::CHECK_NOT_EQUAL:
-                ASSERT_NE(i, *((int64_t*)(ids) + i * k));
+                ASSERT_NE(i, id);
                 break;
             default:
                 ASSERT_TRUE(false);
@@ -137,58 +143,84 @@ AssertAnns(const knowhere::DatasetPtr& result, const int nq, const int k, const 
     }
 }
 
-#if 0
 void
-AssertVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-          const knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
-    float* base = (float*)base_dataset->Get<const void*>(knowhere::meta::TENSOR);
-    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
-    auto x = result->Get<float*>(knowhere::meta::TENSOR);
-    for (auto i = 0; i < n; i++) {
-        auto id = ids[i];
-        for (auto j = 0; j < dim; j++) {
-            switch (check_mode) {
-                case CheckMode::CHECK_EQUAL: {
-                    ASSERT_EQ(*(base + id * dim + j), *(x + i * dim + j));
-                    break;
-                }
-                case CheckMode::CHECK_NOT_EQUAL: {
-                    ASSERT_NE(*(base + id * dim + j), *(x + i * dim + j));
-                    break;
-                }
-                case CheckMode::CHECK_APPROXIMATE_EQUAL: {
-                    float a = *(base + id * dim + j);
-                    float b = *(x + i * dim + j);
-                    ASSERT_TRUE((std::fabs(a - b) / std::fabs(a)) < 0.1);
-                    break;
-                }
-                default:
-                    ASSERT_TRUE(false);
-                    break;
+AssertDist(const knowhere::DatasetPtr& result,
+           const knowhere::MetricType& metric,
+           const int nq,
+           const int k) {
+    auto distance = knowhere::GetDatasetDistance(result);
+    bool is_ip = (metric == knowhere::metric::IP);
+    for (auto i = 0; i < nq; i++) {
+        for (auto j = 1; j < k; j++) {
+            auto va = distance[i * k + j - 1];
+            auto vb = distance[i * k + j];
+            if (is_ip) {
+                ASSERT_GE(va, vb);  // descending order
+            } else {
+                ASSERT_LE(va, vb);  // ascending order
             }
         }
     }
 }
 
 void
-AssertBinVec(const knowhere::DatasetPtr& result, const knowhere::DatasetPtr& base_dataset,
-             const knowhere::DatasetPtr& id_dataset, const int n, const int dim, const CheckMode check_mode) {
-    auto base = (uint8_t*)base_dataset->Get<const void*>(knowhere::meta::TENSOR);
-    auto ids = id_dataset->Get<const int64_t*>(knowhere::meta::IDS);
-    auto x = result->Get<float*>(knowhere::meta::TENSOR);
-    for (auto i = 0; i < 1; i++) {
+AssertVec(const knowhere::DatasetPtr& result,
+          const knowhere::DatasetPtr& base_dataset,
+          const knowhere::DatasetPtr& id_dataset,
+          const int n,
+          const int dim) {
+    float* base = (float*)knowhere::GetDatasetTensor(base_dataset);
+    auto ids = knowhere::GetDatasetInputIDs(id_dataset);
+    auto x = (float*)knowhere::GetDatasetTensor(result);
+    for (auto i = 0; i < n; i++) {
         auto id = ids[i];
         for (auto j = 0; j < dim; j++) {
-            ASSERT_EQ(*(base + id * dim + j), *(x + i * dim + j));
+            float va = *(base + id * dim + j);
+            float vb = *(x + i * dim + j);
+            ASSERT_EQ(va, vb);
         }
     }
 }
-#endif
+
+void
+AssertBinVec(const knowhere::DatasetPtr& result,
+             const knowhere::DatasetPtr& base_dataset,
+             const knowhere::DatasetPtr& id_dataset,
+             const int n,
+             const int dim) {
+    auto base = (uint8_t*)knowhere::GetDatasetTensor(base_dataset);
+    auto ids = knowhere::GetDatasetInputIDs(id_dataset);
+    auto x = (uint8_t*)knowhere::GetDatasetTensor(result);
+    int dim_uint8 = dim / 8;
+    for (auto i = 0; i < n; i++) {
+        auto id = ids[i];
+        for (auto j = 0; j < dim_uint8; j++) {
+            uint8_t va = *(base + id * dim_uint8 + j);
+            uint8_t vb = *(x + i * dim_uint8 + j);
+            ASSERT_EQ(va, vb);
+        }
+    }
+}
+
+void
+normalize(float* vec, int64_t n, int64_t dim) {
+    for (int64_t i = 0; i < n; i++) {
+        double vecLen = 0.0, inv_vecLen = 0.0;
+        for (int64_t j = 0; j < dim; j++) {
+            double val = vec[i * dim + j];
+            vecLen += val * val;
+        }
+        inv_vecLen = 1.0 / std::sqrt(vecLen);
+        for (int64_t j = 0; j < dim; j++) {
+            vec[i * dim + j] = (float)(vec[i * dim + j] * inv_vecLen);
+        }
+    }
+}
 
 void
 PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    auto dist = result->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = knowhere::GetDatasetIDs(result);
+    auto dist = knowhere::GetDatasetDistance(result);
 
     std::stringstream ss_id;
     std::stringstream ss_dist;
@@ -206,83 +238,41 @@ PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     std::cout << "dist\n" << ss_dist.str() << std::endl;
 }
 
-void
-ReleaseQueryResult(const knowhere::DatasetPtr& result) {
-    float* res_dist = result->Get<float*>(knowhere::meta::DISTANCE);
-    free(res_dist);
-
-    int64_t* res_ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    free(res_ids);
-}
-
-// not used
-#if 0
-void
-Load_nns_graph(std::vector<std::vector<int64_t>>& final_graph, const char* filename) {
-    std::vector<std::vector<unsigned>> knng;
-
-    std::ifstream in(filename, std::ios::binary);
-    unsigned k;
-    in.read((char*)&k, sizeof(unsigned));
-    in.seekg(0, std::ios::end);
-    std::ios::pos_type ss = in.tellg();
-    size_t fsize = (size_t)ss;
-    size_t num = (size_t)(fsize / (k + 1) / 4);
-    in.seekg(0, std::ios::beg);
-
-    knng.resize(num);
-    knng.reserve(num);
-    int64_t kk = (k + 3) / 4 * 4;
-    for (size_t i = 0; i < num; i++) {
-        in.seekg(4, std::ios::cur);
-        knng[i].resize(k);
-        knng[i].reserve(kk);
-        in.read((char*)knng[i].data(), k * sizeof(unsigned));
-    }
-    in.close();
-
-    final_graph.resize(knng.size());
-    for (int i = 0; i < knng.size(); ++i) {
-        final_graph[i].resize(knng[i].size());
-        for (int j = 0; j < knng[i].size(); ++j) {
-            final_graph[i][j] = knng[i][j];
+// path like /tmp may not work for windows
+std::string
+temp_path(const char* path)
+{
+    std::string new_path{path};
+#ifdef WIN32
+    for (auto &ch : new_path) {
+        if (ch == '/') {
+            ch = '_';
         }
     }
+    new_path = std::string("tmp/") + new_path;
+    mkdir("tmp/");
+#endif
+    return new_path;
 }
 
-float*
-fvecs_read(const char* fname, size_t* d_out, size_t* n_out) {
-    FILE* f = fopen(fname, "r");
-    if (!f) {
-        fprintf(stderr, "could not open %s\n", fname);
-        perror("");
-        abort();
-    }
-    int d;
-    fread(&d, 1, sizeof(int), f);
-    assert((d > 0 && d < 1000000) || !"unreasonable dimension");
-    fseek(f, 0, SEEK_SET);
-    struct stat st;
-    fstat(fileno(f), &st);
-    size_t sz = st.st_size;
-    assert(sz % ((d + 1) * 4) == 0 || !"weird file size");
-    size_t n = sz / ((d + 1) * 4);
+#ifdef __MINGW64__
 
-    *d_out = d;
-    *n_out = n;
-    float* x = new float[n * (d + 1)];
-    size_t nr = fread(x, sizeof(float), n * (d + 1), f);
-    assert(nr == n * (d + 1) || !"could not read whole file");
+static std::random_device rd;
+static std::mt19937 gen(rd());
 
-    // shift array to remove row headers
-    for (size_t i = 0; i < n; i++) memmove(x + i * d, x + 1 + i * (d + 1), d * sizeof(*x));
-
-    fclose(f);
-    return x;
+uint32_t lrand48 () {
+    std::uniform_int_distribution<uint32_t> distrib(0, (1 << 31));
+    return distrib(gen);
 }
 
-int*  // not very clean, but works as long as sizeof(int) == sizeof(float)
-ivecs_read(const char* fname, size_t* d_out, size_t* n_out) {
-    return (int*)fvecs_read(fname, d_out, n_out);
+float drand48 () {
+    std::uniform_real_distribution<float> distrib(0.0, 1.0);
+    return distrib(gen);
 }
+
+int64_t random() {
+    std::uniform_int_distribution<int64_t> distrib(0, (1LL << 63));
+    return distrib(gen);
+}
+
 #endif

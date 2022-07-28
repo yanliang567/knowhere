@@ -188,7 +188,7 @@ struct IVFFlatScanner : InvertedListScanner {
         const float* list_vecs = (const float*)codes;
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
-            if (!bitset || !bitset.test(ids[j])) {
+            if (bitset.empty() || !bitset.test(ids[j])) {
                 const float* yj = list_vecs + d * j;
                 float dis = metric == METRIC_INNER_PRODUCT
                         ? fvec_inner_product(xi, yj, d)
@@ -245,6 +245,14 @@ void IndexIVFFlat::reconstruct_from_offset(
         int64_t offset,
         float* recons) const {
     memcpy(recons, invlists->get_single_code(list_no, offset), code_size);
+}
+
+void IndexIVFFlat::reconstruct_from_offset_without_codes(
+        int64_t list_no,
+        int64_t offset,
+        float* recons) const {
+    auto idx = prefix_sum[list_no] + offset;
+    memcpy(recons, arranged_codes.data() + idx * code_size, code_size);
 }
 
 /*****************************************

@@ -36,18 +36,24 @@ class GPUIVF_NM : public IVF, public GPUIndex {
     void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
-    void
-    Load(const BinarySet&) override;
-
     VecIndexPtr
     CopyGpuToCpu(const Config&) override;
 
     VecIndexPtr
     CopyGpuToGpu(const int64_t, const Config&) override;
 
+    int64_t
+    Size() override;
+
+    DatasetPtr
+    QueryByRange(const DatasetPtr&, const Config&, const faiss::BitsetView) override;
+
  protected:
     BinarySet
     SerializeImpl(const IndexType&) override;
+
+    void
+    LoadImpl(const BinarySet&, const IndexType&);
 
     void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::BitsetView) override;
